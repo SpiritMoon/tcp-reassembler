@@ -1,6 +1,5 @@
 #include "util.h"
 
-
 void *mymemmem(const void *haystack, size_t haystacklen, const void *needle, size_t needlelen) {
     const char *ptr = (const char *)haystack;
     const char *end = (const char *)haystack + haystacklen - needlelen + 1;
@@ -26,7 +25,7 @@ void *mymalloc(size_t size)
 {
     void *ptr = malloc(size);
     if (!ptr)
-        error("alloc memory failed\n");
+        myerror("alloc memory failed\n");
     return ptr;
 }
 
@@ -34,7 +33,7 @@ void *mycalloc(size_t count, size_t size)
 {
     void *ptr = calloc(count, size);
     if (!ptr)
-        error("alloc memory failed\n");
+        myerror("alloc memory failed\n");
     return ptr;
 }
 
@@ -67,15 +66,25 @@ char *mystrdup(const char *s)
     return b;
 }
 
-void error(const char *format, ...)
+void myerror(const char *format, ...)
 {
-    printf("\x1b[31m");
+    fprintf(stderr, ANSI_FG_RED);
     va_list args;
     va_start(args, format);
     vfprintf(stderr, format, args);
     va_end(args);
-    printf("\x1b[0m\n");
+    fprintf(stderr, ANSI_RESET "\n");
     exit(EXIT_FAILURE);
+}
+
+void mywarning(const char *format, ...)
+{
+    fprintf(stderr, ANSI_FG_YELLOW);
+    va_list args;
+    va_start(args, format);
+    vfprintf(stderr, format, args);
+    va_end(args);
+    fprintf(stderr, ANSI_RESET "\n");
 }
 
 char *mystrcat(int argc, const char *str1, ...)
@@ -91,7 +100,7 @@ char *mystrcat(int argc, const char *str1, ...)
         len += strlen(s);
         // 1 for '\0'
         if (!(ss = realloc(ss, len + 1)))
-            error("alloc memory for `mystrcat` function failed");
+            myerror("alloc memory for `mystrcat` function failed");
         ss[len] = '\0';
         strcat(ss, s);
     }
@@ -165,7 +174,7 @@ size_t getfilesize(FILE *fp) {
     fseek(fp, 0, SEEK_SET);
     if (data_len == -1) {
         fclose(fp);
-        error("call ftell failed\n");
+        myerror("call ftell failed\n");
     }
     return data_len;
 }

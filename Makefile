@@ -1,7 +1,7 @@
 all: main
 
 main: main.o util.o hashtbl.o http_parser.o
-	cc -o main util.o http_parser.o hashtbl.o main.o -lpcap -Wall
+	cc -std=c99 -o main util.o http_parser.o hashtbl.o main.o -lpcap -lz -Wall
 
 util.o: util.c util.h
 	cc -o util.o -c util.c 

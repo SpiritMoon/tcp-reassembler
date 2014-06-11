@@ -10,8 +10,10 @@
  *         [tcp_data]     len stored in ip header
  */
 #include <stdio.h>
+#include <assert.h>
 #include <dirent.h>
 #include <fcntl.h>
+#include "zlib.h"
 #include "util.h"
 #include "hashtbl.h"
 #include "http_parser.h"
@@ -287,7 +289,7 @@ const char *insert_hash_node(byte *pcap_packet, struct pcap_pkthdr *pcap_header)
     pcap_item *pcap = create_pcap_item(pcap_packet, pcap_header);
 
     if (-1 == hashtbl_insert(get_hash_table(), key, (void *)pcap))
-        error("ERROR: insert to hash table failed");
+        myerror("insert to hash table failed");
     return key;
 }
 
@@ -296,7 +298,7 @@ pcap_t *get_pcap_handle(char *filename) {
     pcap_t *handle;
 
     if (!(handle = pcap_open_offline(filename, errbuf)))
-        error("Couldn't open pcap file %s: %s", filename, errbuf);
+        myerror("Couldn't open pcap file %s: %s", filename, errbuf);
     return handle;
 }
 
@@ -395,7 +397,7 @@ void write_pcap_to_file(pcap_t *handle, HASHNODE *node) {
 
     pcap_dumper_t *pd;
     if (!(pd = pcap_dump_open(handle, filename)))
-        error("opening savefile '%s' failed for writing\n", filename);
+        myerror("opening savefile '%s' failed for writing\n", filename);
 
     while (node) {
         pcap_item *pcap = (pcap_item *)node->data;
@@ -480,7 +482,7 @@ HASHNODE *combine_hash_nodes(const char *key1, const char *key2) {
 }
 
 // TODO: finish this
-bool is_different_tcp_packet_n(HASHNODE *node1, HASHNODE *node2) {
+bool is_same_tcp_packet_n(HASHNODE *node1, HASHNODE *node2) {
     void *ip_packet1 = get_ip_header_n(node1);
     void *ip_packet2 = get_ip_header_n(node2);
     tcp_hdr *ctcp_packet = get_tcp_header(ip_packet1);
@@ -502,7 +504,7 @@ HASHNODE *combine_tcp_packet(hash_size index) {
     while (node) {
         next = node->next;
         // if they are duplication packet, then drop it
-        should_drop = next ? is_different_tcp_packet_n(node, next) : FALSE;
+        should_drop = next ? is_same_tcp_packet_n(node, next) : FALSE;
         // if no data, then skip node
         should_drop |= (0 == get_tcp_data_length_n(node));
         if (should_drop) {
@@ -527,7 +529,7 @@ HASHNODE *combine_tcp_packet(hash_size index) {
  */
 size_t write_tcp_data_to_file(FILE *fp, byte *data_ptr, size_t data_len) {
     if (data_len && data_len != fwrite(data_ptr, 1, data_len, fp))
-        error("write wrong size of tcp data to file\n");
+        mylogging("write wrong size of tcp data to file\n");
     return data_len;
 }
 
@@ -550,7 +552,7 @@ size_t write_tcp_data_to_file_n(FILE *fp, HASHNODE *node) {
     DIR *dir;                                                       \
     struct dirent *ent;                                             \
     if (!(dir = opendir(dirname)))                                  \
-        error("open directory '%s' failed\n", dirname);             \
+        myerror("open directory '%s' failed\n", dirname);             \
     while ((ent = readdir(dir)) != NULL) {                          \
         char *filename = ent->d_name;                               \
         if (!is_pcap_file(filename))                                \
@@ -677,11 +679,83 @@ int _on_body(http_parser* _, const char* at, size_t length) {
     return 0;
 }
 
+size_t gzipfwrite(void *data, size_t data_len, FILE *dest) {
+    int ret;
+    unsigned have;
+    z_stream strm;
+    unsigned char out[CHUNK];
+
+    /* allocate inflate state */
+    strm.zalloc = Z_NULL;
+    strm.zfree = Z_NULL;
+    strm.opaque = Z_NULL;
+    strm.avail_in = 0;
+    strm.next_in = Z_NULL;
+    if ((ret = inflateInit2(&strm, 15 + 32)) != Z_OK)
+        return 0;
+
+    /* decompress until deflate stream ends or end of file */
+    size_t done = 0;
+    do {
+        strm.avail_in = MIN(data_len - done, CHUNK);
+        strm.next_in = (unsigned char *)data + done;
+        done += strm.avail_in;
+
+        /* run inflate() on input until output buffer not full */
+        do {
+            strm.avail_out = CHUNK;
+            strm.next_out = out;
+            ret = inflate(&strm, Z_NO_FLUSH);
+            /* state not clobbered */
+            switch (ret) {
+            case Z_NEED_DICT:
+                ret = Z_DATA_ERROR;
+                // fall through
+            case Z_STREAM_ERROR:
+            case Z_DATA_ERROR:
+            case Z_MEM_ERROR:
+                goto END;
+            }
+            have = CHUNK - strm.avail_out;
+            if (fwrite(out, 1, have, dest) != have || ferror(dest))
+                goto END;
+        } while (strm.avail_out == 0);
+
+    /* done when inflate() says it's done */
+    } while (done < data_len && ret != Z_STREAM_END);
+
+END:
+    /* clean up and return */
+    (void)inflateEnd(&strm);
+    const char *prefix = ANSI_FG_CYAN "gzipfwrite" ANSI_RESET;
+    switch (ret) {
+    case Z_ERRNO:
+        if (ferror(dest))
+            mywarning("%s: writing stdout\n", prefix);
+        break;
+    case Z_STREAM_ERROR:
+        mywarning("%s: invalid compression level\n", prefix);
+        break;
+    case Z_DATA_ERROR:
+        mywarning("%s: invalid or incomplete deflate data\n", prefix);
+        break;
+    case Z_MEM_ERROR:
+        mywarning("%s: out of memory\n", prefix);
+        break;
+    case Z_VERSION_ERROR:
+        mywarning("%s: zlib version mismatch!\n", prefix);
+        break;
+    case Z_STREAM_END:
+        // fall through
+    default:
+        break;
+    }
+    return MIN(done, data_len);
+}
+
 void write_http_info_to_file() {
     if (!_g_http.url || !_g_http.data || !_g_http.content_type)
         return;
-    if (_g_http.is_gzip_encoding)
-        _g_http.data = _g_http.data;
     char *basename = url2filename(_g_http.url);
     if (!strrchr(basename, '.')) {
         char *tmp = basename;
@@ -694,25 +768,27 @@ void write_http_info_to_file() {
     free(basename);
     free(filename);
     if (!fp)
-        error("can't open %s for write\n", filename);
-    fwrite(_g_http.data, 1, _g_http.data_len, fp);
+        mylogging("can't open %s for write\n", filename);
+    if (_g_http.is_gzip_encoding)
+        assert(_g_http.data_len == gzipfwrite(_g_http.data, _g_http.data_len, fp));
+    else
+        assert(_g_http.data_len == fwrite(_g_http.data, 1, _g_http.data_len, fp));
     fclose(fp);
 }
 
 #define read_file_into_memory(fp, data, data_len) do {      \
     FILE *fp;                                               \
     if (!(fp = fopen(filename, "rb")))                      \
-        error("can't open %s for http parse", filename);    \
+        mylogging("can't open %s for http parse", filename);      \
     data_len = getfilesize(fp);                             \
     data = mymalloc(data_len);                              \
     if (fread(data, 1, data_len, fp) != data_len) {         \
         free(data);                                         \
-        error("couldn't read entire file\n");               \
+        mylogging("couldn't read entire file\n");                 \
     }                                                       \
     fclose(fp);                                             \
 } while (0)
 
-#define DEBUG
 void write_http_data_to_file(const char *filename) {
     // read file into memory
     char *data;
@@ -737,7 +813,6 @@ void write_http_data_to_file(const char *filename) {
         // get a request or response string
         left_len = data + data_len - begin;
         end = (const char *)mymemmem(begin, left_len, REQUEST_GAP, REQUEST_GAP_LEN);
-        // printf("%.*s\n", 4, strchr(begin, '\r'));
         token_len = (end == NULL) ? (left_len) : (end - begin);
         token = mymalloc(token_len);
         memcpy(token, begin, token_len);
@@ -755,8 +830,11 @@ void write_http_data_to_file(const char *filename) {
 
         if (nparsed != token_len) {
             #ifdef DEBUG
-            // pretty debug log
-            printf("\x1b[33m%s\x1b[0m: \x1b[31m%s\x1b[0m\n\x1b[32m[0x%08X]:\x1b[0m %.*s\n\n",
+            // pretty debug mylogging
+            printf(ANSI_FG_CYAN "%s" ANSI_RESET ": "
+                   ANSI_FG_RED "%s" ANSI_RESET "\n"
+                   ANSI_FG_GREEN "[0x%08X]:" ANSI_RESET
+                   " %.*s\n\n",
                    filename,
                    http_errno_description(HTTP_PARSER_ERRNO(&parser)),
                    // bytes offset in file
@@ -790,7 +868,7 @@ void write_http_data_to_files() {
     DIR *dir;
     struct dirent *ent;
     if (!(dir = opendir(REQS_DIR)))
-        error("open directory '" REQS_DIR "' failed\n");
+        myerror("open directory '" REQS_DIR "' failed\n");
     while ((ent = readdir(dir)) != NULL) {
         // deal with filename
         const char *filename = ent->d_name;
@@ -806,13 +884,12 @@ void write_http_data_to_files() {
 
 void init_environment(int argc, char **argv) {
     if (argc < 2)
-        error("usage: %s [file]", argv[0]);
+        myerror("usage: %s [file]", argv[0]);
     mkdir(PCAP_DIR, 0754);
     mkdir(REQS_DIR, 0754);
     mkdir(HTTP_DIR, 0754);
 }
 
-#define DEBUG
 int main(int argc, char **argv) {
     const u_char *pcap_packet;
     struct pcap_pkthdr header;
