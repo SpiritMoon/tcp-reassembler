@@ -58,6 +58,14 @@ void replacechr(char *str, char old, char new) {
     }
 }
 
+void lowercase(char *str) {
+    while (*str){
+        if ('Z' >= *str && *str >= 'A')
+            *str = *str - 'A' + 'a';
+        str++;
+    }
+}
+
 char *mystrdup(const char *s)
 {
     char *b;
@@ -116,23 +124,30 @@ char *pathcat(const char *dir, const char *filename)
 
 char *url2filename(const char *url) {
     size_t url_len = strlen(url);
-    int offset = 0;
-    const char *begin;;
-    if (*url == '/') {
-        if (url_len == 1)
-            return strdup("index");
-        offset = 1;
+    const char *begin = url;
+    const char *end = strchr(url, '?');
+    const char *tmp = url;
+
+    // end before first '?'
+    end = (end == NULL) ? (url + url_len - 1) : (end - 1);
+    // match "/"
+    if (begin == end && *begin == '/' && *end == '/')
+        return strndup("index", 5);
+    // skip all end with '/'
+    while (url < end && *end == '/')
+        end--;
+    // begin after last '/'
+    while (tmp < end) {
+        tmp = strchr(begin, '/');
+        if (tmp == NULL || tmp > end)
+            break;
+        begin = tmp + 1;
     }
-    // end with '/' or can't find '/'
-    const char *end = url + url_len - 1;
-    if (*end == '/' || !(begin = strrchr(url, '/')))
-        begin = url;
 
-
-    if (*end != '/' && !(end = strchr(begin, '?')))
-        end = url + url_len;
-
-    return strndup(begin + offset, end - begin - offset);
+    if (begin > end)
+        return strndup("unknown", 7);
+    else
+        return strndup(begin, end - begin + 1);
 }
 
 size_t hexprint(void *ptr, size_t length)

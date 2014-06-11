@@ -99,7 +99,7 @@ do {                                                                 \
     FOR##_mark = NULL;                                               \
   }                                                                  \
 } while (0)
-  
+
 /* Run the data callback FOR and consume the current byte */
 #define CALLBACK_DATA(FOR)                                           \
     CALLBACK_DATA_(FOR, p - FOR##_mark, p - data + 1)
@@ -231,6 +231,148 @@ static const uint8_t normal_url_char[32] = {
         1    |   2    |   4    |   8    |   16   |   32   |   64   |   0, };
 
 #undef T
+
+// Content-Type map
+static char *CT_APPLICATION_MAP[][2] = {
+  {"envoy", "evy"},
+  {"fractals", "fif"},
+  {"futuresplash", "spl"},
+  {"hta", "hta"},
+  {"internet-property-stream", "acx"},
+  {"mac-binhex40", "hqx"},
+  {"msword", "doc"},
+  {"octet-stream", "*"},
+  {"oda", "oda"},
+  {"olescript", "axs"},
+  {"pdf", "pdf"},
+  {"pics-rules", "prf"},
+  {"pkcs10", "p10"},
+  {"pkix-crl", "crl"},
+  {"postscript", "ai"},
+  {"rtf", "rtf"},
+  {"set-payment-initiation", "setpay"},
+  {"set-registration-initiation", "setreg"},
+  {"vnd.ms-excel", "xla"},
+  {"vnd.ms-outlook", "msg"},
+  {"vnd.ms-pkicertstore", "sst"},
+  {"vnd.ms-pkiseccat", "cat"},
+  {"vnd.ms-pkistl", "stl"},
+  {"vnd.ms-powerpoint", "pot"},
+  {"vnd.ms-project", "mpp"},
+  {"vnd.ms-works", "wcm"},
+  {"winhlp", "hlp"},
+  {"x-bcpio", "bcpio"},
+  {"x-cdf", "cdf"},
+  {"x-compress", "z"},
+  {"x-compressed", "tgz"},
+  {"x-cpio", "cpio"},
+  {"x-csh", "csh"},
+  {"x-director", "dcr"},
+  {"x-dvi", "dvi"},
+  {"x-gtar", "gtar"},
+  {"x-gzip", "gz"},
+  {"x-hdf", "hdf"},
+  {"x-internet-signup", "ins"},
+  {"x-iphone", "iii"},
+  {"x-javascript", "js"},
+  {"x-latex", "latex"},
+  {"x-msaccess", "mdb"},
+  {"x-mscardfile", "crd"},
+  {"x-msclip", "clp"},
+  {"x-msdownload", "dll"},
+  {"x-msmediaview", "m13"},
+  {"x-msmetafile", "wmf"},
+  {"x-msmoney", "mny"},
+  {"x-mspublisher", "pub"},
+  {"x-msschedule", "scd"},
+  {"x-msterminal", "trm"},
+  {"x-mswrite", "wri"},
+  {"x-netcdf", "cdf"},
+  {"x-perfmon", "pma"},
+  {"x-pkcs12", "p12"},
+  {"x-pkcs7-certificates", "p7b"},
+  {"x-pkcs7-certreqresp", "p7r"},
+  {"x-pkcs7-mime", "p7c"},
+  {"x-pkcs7-signature", "p7s"},
+  {"x-sh", "sh"},
+  {"x-shar", "shar"},
+  {"x-shockwave-flash", "swf"},
+  {"x-stuffit", "sit"},
+  {"x-sv4cpio", "sv4cpio"},
+  {"x-sv4crc", "sv4crc"},
+  {"x-tar", "tar"},
+  {"x-tcl", "tcl"},
+  {"x-tex", "tex"},
+  {"x-texinfo", "texi"},
+  {"x-troff", "roff"},
+  {"x-troff-man", "man"},
+  {"x-troff-me", "me"},
+  {"x-troff-ms", "ms"},
+  {"x-ustar", "ustar"},
+  {"x-wais-source", "src"},
+  {"x-x509-ca-cert", "cer"},
+  {"ynd.ms-pkipko", "pko"},
+  {"zip", "zip"},
+  {"", ""}
+};
+static char *CT_AUDIO_MAP[][2] = {
+  {"basic", "au"},
+  {"mid", "mid"},
+  {"mpeg", "mp3"},
+  {"x-aiff", "aif"},
+  {"x-mpegurl", "m3u"},
+  {"x-pn-realaudio", "ra"},
+  {"x-wav", "wav"},
+  {"", ""}
+};
+static char *CT_IMAGE_MAP[][2] = {
+  {"bmp", "bmp"},
+  {"cis-cod", "cod"},
+  {"gif", "gif"},
+  {"ief", "ief"},
+  {"jpeg", "jpe"},
+  {"jpeg", "jpeg"},
+  {"pipeg", "jfif"},
+  {"svg+xml", "svg"},
+  {"tiff", "tif"},
+  {"x-cmu-raster", "ras"},
+  {"x-cmx", "cmx"},
+  {"x-icon", "ico"},
+  {"x-portable-anymap", "pnm"},
+  {"x-portable-bitmap", "pbm"},
+  {"x-portable-graymap", "pgm"},
+  {"x-portable-pixmap", "ppm"},
+  {"x-rgb", "rgb"},
+  {"x-xbitmap", "xbm"},
+  {"x-xpixmap", "xpm"},
+  {"x-xwindowdump", "xwd"},
+  {"", ""}
+};
+static char *CT_TEXT_MAP[][2] = {
+  {"css", "css"},
+  {"h323", "323"},
+  {"html", "html"},
+  {"iuls", "uls"},
+  {"plain", "bas"},
+  {"richtext", "rtx"},
+  {"scriptlet", "sct"},
+  {"tab-separated-values", "tsv"},
+  {"webviewhtml", "htt"},
+  {"x-component", "htc"},
+  {"x-setext", "etx"},
+  {"x-vcard", "vcf"},
+  {"", ""}
+};
+static char *CT_VIDEO_MAP[][2] = {
+  {"mpeg", "mp2"},
+  {"mpeg", "mpeg"},
+  {"quicktime", "mov"},
+  {"x-la-asf", "lsf"},
+  {"x-ms-asf", "asf"},
+  {"x-msvideo", "avi"},
+  {"x-sgi-movie", "movie"},
+  {"", ""}
+};
 
 enum state
   { s_dead = 1 /* important that this is > 0 */
@@ -2254,4 +2396,41 @@ http_parser_version(void) {
   return HTTP_PARSER_VERSION_MAJOR * 0x10000 |
          HTTP_PARSER_VERSION_MINOR * 0x00100 |
          HTTP_PARSER_VERSION_PATCH * 0x00001;
+}
+
+char *
+get_http_file_suffix(const char *content_type) {
+    char *buf = strdup(content_type);
+    for (int i = 0; buf[i]; i++) {
+        if ('A' <= buf[i] && buf[i] <= 'Z')
+            buf[i] = buf[i] - 'A' + 'a';
+    }
+    char *m = strchr(buf, '/');
+    char *e = strchr(buf, ';');
+    size_t mlen = m - buf;
+    char *(*content_type_map)[2];
+
+    if (!strncmp(buf, "application", mlen)) {
+        content_type_map = CT_APPLICATION_MAP;
+    } else if (!strncmp(buf, "audio", mlen)) {
+        content_type_map = CT_AUDIO_MAP;
+    } else if (!strncmp(buf, "image", mlen)) {
+        content_type_map = CT_IMAGE_MAP;
+    } else if (!strncmp(buf, "text", mlen)) {
+        content_type_map = CT_TEXT_MAP;
+    } else if (!strncmp(buf, "video", mlen)) {
+        content_type_map = CT_VIDEO_MAP;
+    }
+
+    char *tmp = NULL;
+    for (int i = 0; *content_type_map[i][0]; i++) {
+        if (!strncmp(m + 1, content_type_map[i][0], e - m - 1)) {
+            tmp = strdup(content_type_map[i][1]);
+            break;
+        }
+    }
+    if (tmp == NULL)
+        tmp = strndup(m + 1, e - m - 1);
+    free(buf);
+    return tmp;
 }

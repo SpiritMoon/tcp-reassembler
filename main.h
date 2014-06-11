@@ -39,7 +39,6 @@
 typedef struct ip ip4_hdr;
 typedef struct ip6_hdr ip6_hdr;
 typedef struct tcphdr tcp_hdr;
-typedef char http_hdr;
 typedef struct {
     struct pcap_pkthdr header;
     byte *packet;

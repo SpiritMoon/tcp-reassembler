@@ -77,6 +77,7 @@ void *mymemmem(const void *haystack, size_t haystacklen, const void *needle, siz
 void *mymalloc(size_t size);
 void *mycalloc(size_t count, size_t size);
 
+void lowercase(char *str);
 char *strnchr(const char *s, char ch, size_t n);
 void replacechr(char *str, char old, char new);
 char *mystrdup(const char *s);

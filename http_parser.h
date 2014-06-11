@@ -83,6 +83,7 @@ typedef struct http_parser_settings http_parser_settings;
 typedef int (*http_data_cb) (http_parser*, const char *at, size_t length);
 typedef int (*http_cb) (http_parser*);
 
+char * get_http_file_suffix(const char *content_type);
 
 /* Request Methods */
 #define HTTP_METHOD_MAP(XX)         \

@@ -13,7 +13,7 @@
 #include <assert.h>
 #include <dirent.h>
 #include <fcntl.h>
-#include "zlib.h"
+#include <zlib.h>
 #include "util.h"
 #include "hashtbl.h"
 #include "http_parser.h"
@@ -425,7 +425,7 @@ void write_pcaps_to_files(pcap_t *handle) {
 }
 
 
-HASHNODE *combine_hash_nodes(const char *key1, const char *key2) {
+hash_size combine_hash_nodes(const char *key1, const char *key2) {
     HASHTBL *hashtbl = get_hash_table();
     hash_size hash1 = get_hash_index(key1);
     hash_size hash2 = get_hash_index(key2);
@@ -434,9 +434,9 @@ HASHNODE *combine_hash_nodes(const char *key1, const char *key2) {
 
     // if one nodes is empty, then return another one
     if (hash1 == -1 || !(node1 = hashtbl->nodes[hash1]))
-        return hashtbl->nodes[hash2];
+        return hash2;
     if (hash2 == -1 || !(node2 = hashtbl->nodes[hash2]))
-        return hashtbl->nodes[hash1];
+        return hash1;
 
     // make sure of node1 being requester and node2 being responser
     unsigned char flags = get_tcp_header_n(node1)->th_flags;
@@ -460,7 +460,6 @@ HASHNODE *combine_hash_nodes(const char *key1, const char *key2) {
         hashtbl->nodes[hash1] = node2;
         node2 = next2;
     }
-    hashtbl->nodes[hash2] = NULL;
 
     hashtbl->nodes[hash1] = node1 = sort_pcap_packets(hashtbl->nodes[hash1]);
     // recovery seq and ack in original node2
@@ -478,16 +477,21 @@ HASHNODE *combine_hash_nodes(const char *key1, const char *key2) {
         free((void *)tmp);
     }
 
-    return hashtbl->nodes[hash1];
+    node1 = hashtbl->nodes[hash1];
+    hashtbl->nodes[hash1] = NULL;
+    hashtbl->nodes[hash2] = NULL;
+    hash1 = hashtbl->hashfunc(node1->key) % hashtbl->size;
+    hashtbl->nodes[hash1] = node1;
+    return hash1;
 }
 
-// TODO: finish this
 bool is_same_tcp_packet_n(HASHNODE *node1, HASHNODE *node2) {
     void *ip_packet1 = get_ip_header_n(node1);
     void *ip_packet2 = get_ip_header_n(node2);
     tcp_hdr *ctcp_packet = get_tcp_header(ip_packet1);
     tcp_hdr *ntcp_packet = get_tcp_header(ip_packet2);
 
+    // TODO: forget this function, I can't find any solution to do this.
     return 0;
     return is_same_ip_port(ip_packet1, ip_packet2)
            && ctcp_packet->th_seq == ntcp_packet->th_seq
@@ -552,7 +556,7 @@ size_t write_tcp_data_to_file_n(FILE *fp, HASHNODE *node) {
     DIR *dir;                                                       \
     struct dirent *ent;                                             \
     if (!(dir = opendir(dirname)))                                  \
-        myerror("open directory '%s' failed\n", dirname);             \
+        myerror("open directory '%s' failed\n", dirname);           \
     while ((ent = readdir(dir)) != NULL) {                          \
         char *filename = ent->d_name;                               \
         if (!is_pcap_file(filename))                                \
@@ -576,6 +580,7 @@ void write_tcp_data_to_files() {
     // write http requests and responses
     HASHTBL *hashtbl = get_hash_table();
     HASHNODE *node1;
+    hash_size hash1;
     const char *key1;
     const char *key2;
     char *filename;
@@ -588,9 +593,9 @@ void write_tcp_data_to_files() {
         key1 = node1->key;
         key2 = reverse_ip_port_pair(key1);
         // combin two direction ip:port pair and write to file
-        node1 = combine_hash_nodes(key1, key2);
+        hash1 = combine_hash_nodes(key1, key2);
         // delete all empty nodes (no tcp data)
-        node1 = combine_tcp_packet(get_hash_index(node1->key));
+        node1 = combine_tcp_packet(hash1);
         // skip empty file
         if (!node1)
             continue;
@@ -643,13 +648,6 @@ void _reset_http_info() {
     _g_http.is_gzip_encoding = FALSE;
 }
 
-void _set_content_type(const char *at, size_t length) {
-    char *begin = 1 + strnchr(at, '/', length);
-    length -= begin - at;
-    char *end = strnchr(begin, ';', length);
-    _g_http.content_type = strndup(begin, end - begin);
-}
-
 int _on_header_field(http_parser* _, const char* at, size_t length) {
     _g_http.on_content_type = !strncmp("Content-Type", at, length);
     _g_http.on_content_encoding = !strncmp("Content-Encoding", at, length);
@@ -658,7 +656,7 @@ int _on_header_field(http_parser* _, const char* at, size_t length) {
 
 int _on_header_value(http_parser* _, const char* at, size_t length) {
     if (_g_http.on_content_type)
-        _set_content_type(at, length);
+        _g_http.content_type = strndup(at, length);
     else if (_g_http.on_content_encoding)
         _g_http.is_gzip_encoding = !strncmp(at, "gzip", length);
     return 0;
@@ -679,7 +677,7 @@ int _on_body(http_parser* _, const char* at, size_t length) {
     return 0;
 }
 
-size_t gzipfwrite(void *data, size_t data_len, FILE *dest) {
+size_t gzip_fwrite(void *data, size_t data_len, FILE *dest) {
     int ret;
     unsigned have;
     z_stream strm;
@@ -727,7 +725,7 @@ size_t gzipfwrite(void *data, size_t data_len, FILE *dest) {
 END:
     /* clean up and return */
     (void)inflateEnd(&strm);
-    const char *prefix = ANSI_FG_CYAN "gzipfwrite" ANSI_RESET;
+    const char *prefix = ANSI_FG_CYAN "gzip_fwrite" ANSI_RESET;
     switch (ret) {
     case Z_ERRNO:
         if (ferror(dest))
@@ -753,38 +751,49 @@ END:
     return MIN(done, data_len);
 }
 
-void write_http_info_to_file() {
-    if (!_g_http.url || !_g_http.data || !_g_http.content_type)
-        return;
+char *get_http_filename() {
     char *basename = url2filename(_g_http.url);
     if (!strrchr(basename, '.')) {
         char *tmp = basename;
-        basename = mystrcat(3, basename, ".", _g_http.content_type);
+        char *suf = get_http_file_suffix(_g_http.content_type);
+        basename = mystrcat(3, basename, ".", suf);
         free(tmp);
+        free(suf);
     }
+    return basename;
+}
 
+void write_http_info_to_file() {
+    if (!_g_http.url || !_g_http.data || !_g_http.content_type)
+        return;
+    char *basename = get_http_filename();
     char *filename = pathcat(HTTP_DIR, basename);
+    // TODO: same name bug
     FILE *fp = fopen(filename, "ab");
     free(basename);
-    free(filename);
     if (!fp)
         mylogging("can't open %s for write\n", filename);
+
+    size_t wlen;
     if (_g_http.is_gzip_encoding)
-        assert(_g_http.data_len == gzipfwrite(_g_http.data, _g_http.data_len, fp));
+        wlen = gzip_fwrite(_g_http.data, _g_http.data_len, fp);
     else
-        assert(_g_http.data_len == fwrite(_g_http.data, 1, _g_http.data_len, fp));
+        wlen = fwrite(_g_http.data, 1, _g_http.data_len, fp);
+    if (wlen != _g_http.data_len)
+        mywarning("should write %u bytes to %s, but %u done\n", _g_http.data_len, filename, wlen);
+    free(filename);
     fclose(fp);
 }
 
 #define read_file_into_memory(fp, data, data_len) do {      \
     FILE *fp;                                               \
     if (!(fp = fopen(filename, "rb")))                      \
-        mylogging("can't open %s for http parse", filename);      \
+        mylogging("can't open %s for http parse", filename);\
     data_len = getfilesize(fp);                             \
     data = mymalloc(data_len);                              \
     if (fread(data, 1, data_len, fp) != data_len) {         \
         free(data);                                         \
-        mylogging("couldn't read entire file\n");                 \
+        mylogging("couldn't read entire file\n");           \
     }                                                       \
     fclose(fp);                                             \
 } while (0)
@@ -831,15 +840,13 @@ void write_http_data_to_file(const char *filename) {
         if (nparsed != token_len) {
             #ifdef DEBUG
             // pretty debug mylogging
-            printf(ANSI_FG_CYAN "%s" ANSI_RESET ": "
-                   ANSI_FG_RED "%s" ANSI_RESET "\n"
-                   ANSI_FG_GREEN "[0x%08X]:" ANSI_RESET
-                   " %.*s\n\n",
-                   filename,
-                   http_errno_description(HTTP_PARSER_ERRNO(&parser)),
-                   // bytes offset in file
+            printf(ANSI_FG_GREEN "[0x%08X]:" ANSI_RESET
+                   ANSI_FG_CYAN " %s" ANSI_RESET ": "
+                   ANSI_FG_RED "%s" ANSI_RESET "\n",
                    (unsigned int)(begin + nparsed - data),
-                   (int)MIN(token_len - nparsed, 50), begin + nparsed);
+                   filename,
+                   http_errno_description(HTTP_PARSER_ERRNO(&parser)));
+                   // bytes offset in file
             #endif /* DEBUG */
         }
         // move begin cursor to next scan
@@ -900,8 +907,8 @@ int main(int argc, char **argv) {
 #endif
     init_environment(argc, argv);
 #ifdef DEBUG
-    // handle = get_pcap_handle("/Users/fz/Downloads/test.pcap");
-    handle = get_pcap_handle("/Users/fz/Downloads/test2.pcap");
+    handle = get_pcap_handle("/Users/fz/Downloads/test.pcap");
+    // handle = get_pcap_handle("/Users/fz/Downloads/test2.pcap");
     // handle = get_pcap_handle("/Users/fz/Downloads/normal.pcap");
     // handle = get_pcap_handle("/Users/fz/Downloads/wifi.pcap");
 #else
