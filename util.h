@@ -5,19 +5,13 @@
 #include <string.h>
 #include <stdlib.h>
 #include <stdarg.h>
-
-#define DEBUG
-
 #ifdef _WIN32
-# define PATH_DELIMITER "\\"
-#else
-# define PATH_DELIMITER "/"
-#endif /* __WIN32__ */
+#include <Windows.h>
+#endif /* _WIN32 */
 
-#ifndef __FILE__
-# define __FILE__ "main"
-#endif /* __FILE__ */
-
+#ifndef DEBUG
+#define DEBUG
+#endif
 #ifdef DEBUG
 # define mylogging(...)      myerror(__VA_ARGS__)
 # define ANSI_RESET          "\x1b[0m"
@@ -62,13 +56,29 @@
 # define ANSI_BG_WHITE       ""
 #endif /* DEBUG */
 
-#define TRUE 1
+#ifndef TRUE
+#define TRUE  1
+#endif
+#ifndef FALSE
 #define FALSE 0
-#define CR 0x0D
-#define LF 0x0A
+#endif
+#ifndef CHUNK
+#undef  CHUNK
+#endif
 #define CHUNK 16384
+#ifndef MAX
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
+#endif
+#ifndef MIN
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
+#endif
+
+#ifdef _WIN32
+# define PATH_DELIMITER "\\"
+#else
+# define PATH_DELIMITER "/"
+#endif /* __WIN32__ */
+
 
 typedef int bool;
 typedef const unsigned char byte;

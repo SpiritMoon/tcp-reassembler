@@ -11,8 +11,6 @@
  */
 #include <stdio.h>
 #include <assert.h>
-#include <dirent.h>
-#include <fcntl.h>
 #include <zlib.h>
 #include "util.h"
 #include "hashtbl.h"
@@ -200,9 +198,9 @@ tcp_hdr *get_tcp_header(void *ip_packet) {
 /*
  * return beginning memory address of tcp data
  */
-#define get_tcp_data(tcp_packet) (byte *)((char *)(tcp_packet) + tcp_packet->th_off * 4)
+#define get_tcp_data(tcp_packet) (byte *)((char *)(tcp_packet) + TH_OFF(tcp_packet) * 4)
 
-#define get_tcp_data_n(node) (byte *)((char *)(get_tcp_header_n(node)) + get_tcp_header_n(node)->th_off * 4)
+#define get_tcp_data_n(node) (byte *)((char *)(get_tcp_header_n(node)) + TH_OFF(get_tcp_header_n(node)) * 4)
 
 size_t get_tcp_data_length(void *ip_packet) {
     size_t ip_len = 0;
@@ -216,8 +214,8 @@ size_t get_tcp_data_length(void *ip_packet) {
     } else {
         ip_len = ntohs(_IP6(ip_packet)->ip6_plen);
     }
-    // `th_off` specifies the size of the TCP header in 32-bit words
-    tcp_header_len = get_tcp_header(ip_packet)->th_off * 4;
+    // `TH_OFF` specifies the size of the TCP header in 32-bit words
+    tcp_header_len = TH_OFF(get_tcp_header(ip_packet)) * 4;
 
     return ip_len - (ip_header_len + tcp_header_len);
 }
@@ -892,9 +890,15 @@ void write_http_data_to_files() {
 void init_environment(int argc, char **argv) {
     if (argc < 2)
         myerror("usage: %s [file]", argv[0]);
+    #ifdef _WIN32
+    _mkdir(PCAP_DIR);
+    _mkdir(REQS_DIR);
+    _mkdir(HTTP_DIR);
+    #else
     mkdir(PCAP_DIR, 0754);
     mkdir(REQS_DIR, 0754);
     mkdir(HTTP_DIR, 0754);
+    #endif /* _WIN32 */
 }
 
 int main(int argc, char **argv) {
@@ -907,8 +911,8 @@ int main(int argc, char **argv) {
 #endif
     init_environment(argc, argv);
 #ifdef DEBUG
-    handle = get_pcap_handle("/Users/fz/Downloads/test.pcap");
-    // handle = get_pcap_handle("/Users/fz/Downloads/test2.pcap");
+    // handle = get_pcap_handle("/Users/fz/Downloads/test.pcap");
+    handle = get_pcap_handle("/Users/fz/Downloads/test2.pcap");
     // handle = get_pcap_handle("/Users/fz/Downloads/normal.pcap");
     // handle = get_pcap_handle("/Users/fz/Downloads/wifi.pcap");
 #else

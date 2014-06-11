@@ -1,5 +1,11 @@
 #include "util.h"
 
+bool is_little_endian()
+{
+    unsigned int i = 1;
+    return *(char *)&i;
+}
+
 void *mymemmem(const void *haystack, size_t haystacklen, const void *needle, size_t needlelen) {
     const char *ptr = (const char *)haystack;
     const char *end = (const char *)haystack + haystacklen - needlelen + 1;
@@ -175,12 +181,6 @@ size_t hexprint(void *ptr, size_t length)
 
     printf("\n");
     return byte_counter;
-}
-
-bool is_little_endian()
-{
-    unsigned int i = 1;
-    return *(char *)&i;
 }
 
 size_t getfilesize(FILE *fp) {

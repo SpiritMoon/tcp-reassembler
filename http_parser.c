@@ -330,7 +330,6 @@ static char *CT_IMAGE_MAP[][2] = {
   {"cis-cod", "cod"},
   {"gif", "gif"},
   {"ief", "ief"},
-  {"jpeg", "jpe"},
   {"jpeg", "jpeg"},
   {"pipeg", "jfif"},
   {"svg+xml", "svg"},
