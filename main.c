@@ -912,7 +912,8 @@ int main(int argc, char **argv) {
     init_environment(argc, argv);
 #ifdef DEBUG
     // handle = get_pcap_handle("/Users/fz/Downloads/test.pcap");
-    handle = get_pcap_handle("/Users/fz/Downloads/test2.pcap");
+    //handle = get_pcap_handle("/Users/fz/Downloads/test2.pcap");
+    handle = get_pcap_handle("/Users/fz/Downloads/hust.pcap");
     // handle = get_pcap_handle("/Users/fz/Downloads/normal.pcap");
     // handle = get_pcap_handle("/Users/fz/Downloads/wifi.pcap");
 #else
@@ -923,6 +924,9 @@ int main(int argc, char **argv) {
         void *ip_packet = get_ip_header(pcap_packet);
         // skip if neither IPv4 nor IPv6
         if (NULL == ip_packet)
+            continue;
+        // TODO: skip IPv6 because I can't hold it ╮(╯_╰)╭
+        if (is_ip6(get_ip_protocol(ip_packet)))
             continue;
         if (is_tcp(ip_packet)) {
             insert_hash_node(pcap_packet, &header);
