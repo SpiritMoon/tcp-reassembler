@@ -18,7 +18,6 @@
 # include <netinet/tcp.h>
 # include <netinet/udp.h>
 # include <arpa/inet.h>
-# include <sys/stat.h>
 
 # define TH_OFF(th)  ((th)->th_off)
 

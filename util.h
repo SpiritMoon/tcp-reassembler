@@ -5,8 +5,12 @@
 #include <string.h>
 #include <stdlib.h>
 #include <stdarg.h>
+
 #ifdef _WIN32
-#include <Windows.h>
+# include <Windows.h>
+#else
+# include <dirent.h>
+# include <sys/stat.h>
 #endif /* _WIN32 */
 
 #ifndef DEBUG
@@ -83,6 +87,8 @@
 typedef int bool;
 typedef const unsigned char byte;
 
+bool is_little_endian();
+
 void *mymemmem(const void *haystack, size_t haystacklen, const void *needle, size_t needlelen);
 void *mymalloc(size_t size);
 void *mycalloc(size_t count, size_t size);
@@ -96,8 +102,7 @@ char *pathcat(const char *dir, const char *filename);
 char *url2filename(const char *url);
 size_t hexprint(void *ptr, size_t length);
 size_t getfilesize(FILE *fp);
-
-bool is_little_endian();
+int removedir(const char *path);
 
 void myerror(const char *format, ...);
 void mywarning(const char *format, ...);

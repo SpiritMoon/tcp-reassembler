@@ -133,6 +133,11 @@ const char *get_ip_port_pair(void *ip_packet) {
     // max port number in string takes 5 bytes
     char *str = mymalloc((addr_str_len + 5) * 2 + 5);
     sprintf(str, "%s.%d--%s.%d", buf_src, port_src, buf_dst, port_dst);
+    // replace all ':' to '.' in IPv6
+    for (int i = 0; *(str + i); i++) {
+        if (*(str + i) == ':')
+            *(str + i) = '.';
+    }
 
     return (const char *)str;
 }
@@ -606,6 +611,7 @@ void write_tcp_data_to_files() {
         fclose(fp);
         free(filename);
         remove_hash_nodes(key1);
+        // hashtbl->nodes[hash1] = NULL;
     }
     destory_hash_table();
 }
@@ -880,6 +886,7 @@ void write_http_data_to_files() {
         if (!is_txt_file(filename))
             continue;
         filename = pathcat(REQS_DIR, filename);
+        // printf("%s\n", filename);
         write_http_data_to_file(filename);
         free((void *)filename);
     }
@@ -895,6 +902,9 @@ void init_environment(int argc, char **argv) {
     _mkdir(REQS_DIR);
     _mkdir(HTTP_DIR);
     #else
+    removedir(PCAP_DIR);
+    removedir(REQS_DIR);
+    removedir(HTTP_DIR);
     mkdir(PCAP_DIR, 0754);
     mkdir(REQS_DIR, 0754);
     mkdir(HTTP_DIR, 0754);
@@ -907,16 +917,21 @@ int main(int argc, char **argv) {
     pcap_t *handle;
 
 #ifdef DEBUG
-    argc = 2;
-#endif
-    init_environment(argc, argv);
-#ifdef DEBUG
-    // handle = get_pcap_handle("/Users/fz/Downloads/test.pcap");
-    //handle = get_pcap_handle("/Users/fz/Downloads/test2.pcap");
-    handle = get_pcap_handle("/Users/fz/Downloads/hust.pcap");
-    // handle = get_pcap_handle("/Users/fz/Downloads/normal.pcap");
-    // handle = get_pcap_handle("/Users/fz/Downloads/wifi.pcap");
+    char *dir = "/Users/fz/Downloads";
+    char *files[] = {
+        "test.pcap",
+        "test2.pcap",
+        "hust.pcap",
+        "baidu.pcap",
+        "normal.pcap",
+        "wifi.pcap",
+        ""
+    };
+    for (int i = 0; *files[i]; i++) {
+    init_environment(2, argv);
+    handle = get_pcap_handle(pathcat(dir, files[i]));
 #else
+    init_environment(argc, argv);
     handle = get_pcap_handle(argv[1]);
 #endif
 
@@ -940,5 +955,8 @@ int main(int argc, char **argv) {
     write_http_data_to_files();
 
     pcap_close(handle);
+#ifdef DEBUG
+    }
+#endif
     return 0;
 }

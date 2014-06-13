@@ -274,6 +274,7 @@ static char *CT_APPLICATION_MAP[][2] = {
   {"x-hdf", "hdf"},
   {"x-internet-signup", "ins"},
   {"x-iphone", "iii"},
+  {"javascript", "js"},
   {"x-javascript", "js"},
   {"x-latex", "latex"},
   {"x-msaccess", "mdb"},
@@ -348,6 +349,7 @@ static char *CT_IMAGE_MAP[][2] = {
   {"", ""}
 };
 static char *CT_TEXT_MAP[][2] = {
+  {"javascript", "js"},
   {"css", "css"},
   {"h323", "323"},
   {"html", "html"},
@@ -2406,18 +2408,17 @@ get_http_file_suffix(const char *content_type) {
     }
     char *m = strchr(buf, '/');
     char *e = strchr(buf, ';');
-    size_t mlen = m - buf;
     char *(*content_type_map)[2];
 
-    if (!strncmp(buf, "application", mlen)) {
+    if (!strncmp(m - 11, "application", 11)) {
         content_type_map = CT_APPLICATION_MAP;
-    } else if (!strncmp(buf, "audio", mlen)) {
+    } else if (!strncmp(m - 5, "audio", 5)) {
         content_type_map = CT_AUDIO_MAP;
-    } else if (!strncmp(buf, "image", mlen)) {
+    } else if (!strncmp(m - 5, "image", 5)) {
         content_type_map = CT_IMAGE_MAP;
-    } else if (!strncmp(buf, "text", mlen)) {
+    } else if (!strncmp(m - 4, "text", 4)) {
         content_type_map = CT_TEXT_MAP;
-    } else if (!strncmp(buf, "video", mlen)) {
+    } else if (!strncmp(m - 5, "video", 5)) {
         content_type_map = CT_VIDEO_MAP;
     }
 
