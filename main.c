@@ -10,12 +10,14 @@
  *         [tcp_data]     len stored in ip header
  */
 #include <stdio.h>
+#include <errno.h>
 #include <assert.h>
 #include <zlib.h>
 #include "util.h"
 #include "hashtbl.h"
 #include "http_parser.h"
 #include "main.h"
+#include "list.h"
 
 
 // judge function
@@ -132,7 +134,7 @@ const char *get_ip_port_pair(void *ip_packet) {
 
     // max port number in string takes 5 bytes
     char *str = mymalloc((addr_str_len + 5) * 2 + 5);
-    sprintf(str, "%s.%d--%s.%d", buf_src, port_src, buf_dst, port_dst);
+    sprintf(str, IP_PORT_FORMAT, buf_src, port_src, buf_dst, port_dst);
     // replace all ':' to '.' in IPv6
     for (int i = 0; *(str + i); i++) {
         if (*(str + i) == ':')
@@ -143,10 +145,9 @@ const char *get_ip_port_pair(void *ip_packet) {
 }
 
 const char *reverse_ip_port_pair(const char *ip_port_pair) {
-    char *pair2 = strstr(ip_port_pair, "--");
+    char *pair2 = strstr(ip_port_pair, "-");
     char *pair1 = strndup(ip_port_pair, pair2 - ip_port_pair);
-    // 2 is length of "--"
-    return mystrcat(3, pair2 + 2, "--", pair1);
+    return mystrcat(3, pair2 + 1, "-", pair1);
 }
 
 bool is_same_ip_port(void *ip_packet1, void *ip_packet2) {
@@ -180,6 +181,28 @@ bool is_same_ip_port(void *ip_packet1, void *ip_packet2) {
     return TRUE;
 }
 
+const char *get_ip_pair_from_filename(const char *filename) {
+    const char *ip_port_pair = getbasename(filename);
+    const char *suf = strrchr(ip_port_pair, '.');
+    if (suf)
+        ip_port_pair = strndup(ip_port_pair, suf - ip_port_pair);
+    else
+        ip_port_pair = strdup(ip_port_pair);
+
+    char *pair2 = strstr(ip_port_pair, "-");
+    char *pair1 = strndup(ip_port_pair, pair2 - ip_port_pair);
+    pair2 = strdup(pair2 + 1);
+    char *dot1 = strrchr(pair1, '.');
+    char *dot2 = strrchr(pair2, '.');
+    *dot1 = '\0';
+    *dot2 = '\0';
+
+    free((void *)ip_port_pair);
+    ip_port_pair = mystrcat(3, pair1, "-", pair2);
+    free((void *)pair1);
+    free((void *)pair2);
+    return ip_port_pair;
+}
 
 // TCP
 /*
@@ -392,6 +415,19 @@ HASHNODE *sort_pcap_packets(HASHNODE *list) {
 }
 
 // file operation
+
+void record_report(const char *filename, const char *format, ...)
+{
+    const char *filepath = pathcat(REPORT_DIR, filename);
+    FILE *fp = fopen(filepath, "a");
+    va_list args;
+    va_start(args, format);
+    vfprintf(fp, format, args);
+    va_end(args);
+    fclose(fp);
+    free((void *)filepath);
+}
+
 /*
  * write pcap packet to pcap file
  */
@@ -483,6 +519,7 @@ hash_size combine_hash_nodes(const char *key1, const char *key2) {
     node1 = hashtbl->nodes[hash1];
     hashtbl->nodes[hash1] = NULL;
     hashtbl->nodes[hash2] = NULL;
+    assert(node1);
     hash1 = hashtbl->hashfunc(node1->key) % hashtbl->size;
     hashtbl->nodes[hash1] = node1;
     return hash1;
@@ -620,10 +657,13 @@ void write_tcp_data_to_files() {
 
 // HTTP parse
 typedef struct {
+    bool on_continue;
     bool on_request;
     bool on_content_type;
     bool on_content_encoding;
+    bool on_host;
     bool is_gzip_encoding;
+    char *host;
     char *content_type;
     char *url;
     char *data;
@@ -650,11 +690,13 @@ void _reset_http_info() {
     _g_http.on_content_type = FALSE;
     _g_http.on_content_encoding = FALSE;
     _g_http.is_gzip_encoding = FALSE;
+    _g_http.on_continue = TRUE;
 }
 
 int _on_header_field(http_parser* _, const char* at, size_t length) {
     _g_http.on_content_type = !strncmp("Content-Type", at, length);
     _g_http.on_content_encoding = !strncmp("Content-Encoding", at, length);
+    _g_http.on_host = !strncmp("Host", at, length);
     return 0;
 }
 
@@ -663,6 +705,13 @@ int _on_header_value(http_parser* _, const char* at, size_t length) {
         _g_http.content_type = strndup(at, length);
     else if (_g_http.on_content_encoding)
         _g_http.is_gzip_encoding = !strncmp(at, "gzip", length);
+    else if (_g_http.on_host)
+        _g_http.host = strndup(at, length);
+    return 0;
+}
+
+int _on_headers_complete(http_parser* _) {
+    _g_http.on_continue = TRUE;
     return 0;
 }
 
@@ -755,26 +804,54 @@ END:
     return MIN(done, data_len);
 }
 
-char *get_http_filename() {
-    char *basename = url2filename(_g_http.url);
+char *get_http_filename(const char *url, const char *suf) {
+    char *basename = url2filename(url);
     if (!strrchr(basename, '.')) {
         char *tmp = basename;
-        char *suf = get_http_file_suffix(_g_http.content_type);
         basename = mystrcat(3, basename, ".", suf);
         free(tmp);
-        free(suf);
     }
     return basename;
 }
 
-void write_http_info_to_file() {
+const char *create_http_dirs(const char *rootdir) {
+    const char *dirpath = pathcat(HTTP_DIR, rootdir);
+    if (0 != makedir(dirpath)) {
+        if (errno == EEXIST)
+            return dirpath;
+        myerror("create directory %s failed", dirpath);
+    }
+    const char *image_dir = pathcat(dirpath, "images");
+    const char *js_dir = pathcat(dirpath, "js");
+    const char *css_dir = pathcat(dirpath, "css");
+    makedir(image_dir);
+    makedir(js_dir);
+    makedir(css_dir);
+    free((void *)image_dir);
+    free((void *)js_dir);
+    free((void *)css_dir);
+    return dirpath;
+}
+
+const char *write_http_block_to_dir(const char *dirpath) {
     if (!_g_http.url || !_g_http.data || !_g_http.content_type)
-        return;
-    char *basename = get_http_filename();
-    char *filename = pathcat(HTTP_DIR, basename);
-    // TODO: same name bug
+        return NULL;
+    char *suffix = get_http_file_suffix(_g_http.content_type);
+    if (!strcmp(suffix, "js"))
+        dirpath = pathcat(dirpath, "js");
+    else if (!strcmp(suffix, "css"))
+        dirpath = pathcat(dirpath, "css");
+    else if (!strcmp(suffix, "jpg")
+            ||!strcmp(suffix, "jpeg")
+            ||!strcmp(suffix, "png")
+            ||!strcmp(suffix, "gif"))
+        dirpath = pathcat(dirpath, "images");
+    else
+        dirpath = strdup(dirpath);
+    char *basename = get_http_filename(_g_http.url, suffix);
+    char *filename = pathcat(dirpath, basename);
+
     FILE *fp = fopen(filename, "ab");
-    free(basename);
     if (!fp)
         mylogging("can't open %s for write\n", filename);
 
@@ -785,34 +862,20 @@ void write_http_info_to_file() {
         wlen = fwrite(_g_http.data, 1, _g_http.data_len, fp);
     if (wlen != _g_http.data_len)
         mywarning("should write %u bytes to %s, but %u done\n", _g_http.data_len, filename, wlen);
+    free((void *)dirpath);
     free(filename);
+    free(suffix);
     fclose(fp);
+    return basename;
 }
 
-#define read_file_into_memory(fp, data, data_len) do {      \
-    FILE *fp;                                               \
-    if (!(fp = fopen(filename, "rb")))                      \
-        mylogging("can't open %s for http parse", filename);\
-    data_len = getfilesize(fp);                             \
-    data = mymalloc(data_len);                              \
-    if (fread(data, 1, data_len, fp) != data_len) {         \
-        free(data);                                         \
-        mylogging("couldn't read entire file\n");           \
-    }                                                       \
-    fclose(fp);                                             \
-} while (0)
-
-void write_http_data_to_file(const char *filename) {
-    // read file into memory
-    char *data;
-    size_t data_len;
-    read_file_into_memory(fp, data, data_len);
-
+void write_http_data_to_dir(const char *data, size_t data_len, const char *filename) {
     // init http parser
     http_parser_settings settings;
     http_parser parser;
     _init_http_info();
 
+    const char *srcname = getbasename(filename);
     const char *begin = data;
     const char *end;
     const char *ptr;
@@ -837,20 +900,21 @@ void write_http_data_to_file(const char *filename) {
         settings.on_body = _on_body;
         settings.on_header_field = _on_header_field;
         settings.on_header_value = _on_header_value;
+        settings.on_headers_complete = _on_headers_complete;
         http_parser_init(&parser, HTTP_BOTH);
         size_t nparsed = http_parser_execute(&parser, &settings, token, token_len);
         free(token);
 
         if (nparsed != token_len) {
-            #ifdef DEBUG
+            #ifndef DEBUG
+            // #ifdef DEBUG
             // pretty debug mylogging
-            printf(ANSI_FG_GREEN "[0x%08X]:" ANSI_RESET
-                   ANSI_FG_CYAN " %s" ANSI_RESET ": "
-                   ANSI_FG_RED "%s" ANSI_RESET "\n",
-                   (unsigned int)(begin + nparsed - data),
-                   filename,
-                   http_errno_description(HTTP_PARSER_ERRNO(&parser)));
-                   // bytes offset in file
+            mywarning(ANSI_FG_GREEN "[0x%08X]:" ANSI_RESET
+                      ANSI_FG_CYAN " %s" ANSI_RESET ": "
+                      ANSI_FG_RED "%s" ANSI_RESET,
+                      (unsigned int)(begin + nparsed - data),
+                      srcname,
+                      http_errno_description(HTTP_PARSER_ERRNO(&parser)));
             #endif /* DEBUG */
         }
         // move begin cursor to next scan
@@ -863,52 +927,120 @@ void write_http_data_to_file(const char *filename) {
 
         // update _g_http state
         if (!_g_http.on_request) {
-            write_http_info_to_file();
+            const char *host = _g_http.host;
+            if (host) {
+                const char *dirpath = create_http_dirs(host);
+                const char *http_filename = write_http_block_to_dir(dirpath);
+                if (http_filename) {
+                    record_report("GET_to.txt", "%s->%s\n", srcname, http_filename);
+                }
+                free((void *)dirpath);
+                free((void *)http_filename);
+            }
             _reset_http_info();
         }
         _g_http.on_request = !_g_http.on_request;
     } while (end && left_len > 0);
 
-    free(data);
     _reset_http_info();
 }
 
-#undef read_file_into_memory
-
-void write_http_data_to_files() {
+void write_http_data_to_dirs() {
     DIR *dir;
     struct dirent *ent;
     if (!(dir = opendir(REQS_DIR)))
-        myerror("open directory '" REQS_DIR "' failed\n");
+        myerror("open directory '" REQS_DIR "' failed");
+
     while ((ent = readdir(dir)) != NULL) {
         // deal with filename
         const char *filename = ent->d_name;
         if (!is_txt_file(filename))
             continue;
+        // a directory stores a website's HTTP files
         filename = pathcat(REQS_DIR, filename);
-        // printf("%s\n", filename);
-        write_http_data_to_file(filename);
-        free((void *)filename);
+        FILE *fp = fopen(filename, "rb");
+        if (!fp)
+            mylogging("can't open %s for http parse", filename);
+        size_t data_len = getfilesize(fp);
+        void *data = mymalloc(data_len);
+        if (fread(data, 1, data_len, fp) != data_len) {
+            free(data);
+            mylogging("couldn't read entire file\n");
+        } else {
+            write_http_data_to_dir(data, data_len, filename);
+            free(data);
+        }
+
+        fclose(fp);
     }
     closedir(dir);
+}
+
+
+static list_t *_file_list = NULL;
+list_t *get_file_list() {
+    if (!_file_list)
+        _file_list = list_new();
+    return _file_list;
+}
+
+void list_insert_head(const char *filename) {
+    const char *buf = strdup(filename);
+    list_node_t *node = list_node_new((void *)buf);
+    list_lpush(get_file_list(), node);
+}
+
+void list_insert_tail(const char *filename) {
+    const char *buf = strdup(filename);
+    list_node_t *node = list_node_new((void *)buf);
+    list_rpush(get_file_list(), node);
+}
+
+void traverse_http_diretory(const char *path) {
+    DIR *d = opendir(path);
+    size_t path_len = strlen(path);
+
+    if (d)
+    {
+        struct dirent *p;
+        while (NULL != (p = readdir(d)))
+        {
+            if (!strcmp(p->d_name, ".") || !strcmp(p->d_name, ".."))
+                continue;
+
+            size_t len = path_len + strlen(p->d_name) + 2;
+            char *buf = pathcat(path, p->d_name);
+            struct stat statbuf;
+            if (!stat(buf, &statbuf))
+            {
+                if (S_ISDIR(statbuf.st_mode)) {
+                    traverse_http_diretory(buf);
+                } else {
+                    const char *suffix = getfilesuffix(buf);
+                    if (!strcmp(suffix, "htm") || !strcmp(suffix, "html"))
+                        list_insert_head(buf);
+                    else
+                        list_insert_tail(buf);
+                }
+            }
+            free(buf);
+        }
+        closedir(d);
+    }
 }
 
 
 void init_environment(int argc, char **argv) {
     if (argc < 2)
         myerror("usage: %s [file]", argv[0]);
-    #ifdef _WIN32
-    _mkdir(PCAP_DIR);
-    _mkdir(REQS_DIR);
-    _mkdir(HTTP_DIR);
-    #else
+    removedir(REPORT_DIR);
     removedir(PCAP_DIR);
     removedir(REQS_DIR);
     removedir(HTTP_DIR);
-    mkdir(PCAP_DIR, 0754);
-    mkdir(REQS_DIR, 0754);
-    mkdir(HTTP_DIR, 0754);
-    #endif /* _WIN32 */
+    makedir(REPORT_DIR);
+    makedir(PCAP_DIR);
+    makedir(REQS_DIR);
+    makedir(HTTP_DIR);
 }
 
 int main(int argc, char **argv) {
@@ -919,12 +1051,12 @@ int main(int argc, char **argv) {
 #ifdef DEBUG
     char *dir = "/Users/fz/Downloads";
     char *files[] = {
-        "test.pcap",
+        // "test.pcap",
         "test2.pcap",
-        "hust.pcap",
-        "baidu.pcap",
-        "normal.pcap",
-        "wifi.pcap",
+        // "hust.pcap",
+        // "baidu.pcap",
+        // "normal.pcap",
+        // "wifi.pcap",
         ""
     };
     for (int i = 0; *files[i]; i++) {
@@ -952,7 +1084,61 @@ int main(int argc, char **argv) {
 
     write_pcaps_to_files(handle);
     write_tcp_data_to_files();
-    write_http_data_to_files();
+    write_http_data_to_dirs();
+    DIR *dir;
+    struct dirent *ent;
+    if (!(dir = opendir(HTTP_DIR)))
+        myerror("open directory '%s' failedn", HTTP_DIR);
+    while ((ent = readdir(dir)) != NULL) {
+        char *filename = ent->d_name;
+        if (!strcmp(filename, ".") || !strcmp(filename, ".."))
+            continue;
+        const char *basename;
+        const char *dirname;
+        filename = pathcat(HTTP_DIR, filename);
+        traverse_http_diretory(filename);
+
+        list_node_t *node = get_file_list()->head;
+        if (node) {
+            dirname = getdirname(node->val);
+            record_report("files.txt", "%s: ", dirname);
+            free(dirname);
+
+            basename = getbasename(node->val);
+            const char *suffix = getfilesuffix(basename);
+            if (!strcmp(suffix, "htm") || !strcmp(suffix, "html"))
+                record_report("refer.txt", "%s: ", basename);
+            else {
+                if (get_file_list()->len == 1)
+                    record_report("refer.txt", "%s", basename);
+                else
+                    record_report("refer.txt", "%s + ", basename);
+            }
+            node = node->next;
+            if (node)
+                record_report("files.txt", "%s + ", basename);
+            else
+                record_report("files.txt", "%s", basename);
+        }
+        while (node) {
+            basename = getbasename(node->val);
+            if (node->next) {
+                record_report("refer.txt", "%s + ", basename);
+                record_report("files.txt", "%s + ", basename);
+            } else {
+                record_report("refer.txt", "%s", basename);
+                record_report("files.txt", "%s", basename);
+            }
+            node = node->next;
+        }
+        record_report("refer.txt", "\n\n");
+        record_report("files.txt", "\n\n");
+        free((void *)filename);
+        list_destroy(get_file_list());
+        _file_list = NULL;
+    }
+    break;
+    closedir(dir);
 
     pcap_close(handle);
 #ifdef DEBUG

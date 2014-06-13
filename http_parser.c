@@ -2408,7 +2408,7 @@ get_http_file_suffix(const char *content_type) {
     }
     char *m = strchr(buf, '/');
     char *e = strchr(buf, ';');
-    char *(*content_type_map)[2];
+    char *(*content_type_map)[2] = {0};
 
     if (!strncmp(m - 11, "application", 11)) {
         content_type_map = CT_APPLICATION_MAP;

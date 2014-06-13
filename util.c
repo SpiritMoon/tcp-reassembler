@@ -6,13 +6,15 @@ bool is_little_endian()
     return *(char *)&i;
 }
 
-void *mymemmem(const void *haystack, size_t haystacklen, const void *needle, size_t needlelen) {
+void *mymemmem(const void *haystack, size_t haystacklen, const void *needle, size_t needlelen)
+{
     const char *ptr = (const char *)haystack;
     const char *end = (const char *)haystack + haystacklen - needlelen + 1;
     const char firstch = *(const char *)needle;
     size_t count;
 
-    while (ptr < end) {
+    while (ptr < end)
+    {
         ptr = memchr(ptr, firstch, end - ptr);
         if (!ptr)
             return NULL;
@@ -43,8 +45,10 @@ void *mycalloc(size_t count, size_t size)
     return ptr;
 }
 
-char *strnchr(const char *s, char ch, size_t n) {
-    while (n--) {
+char *strnchr(const char *s, char ch, size_t n)
+{
+    while (n--)
+    {
         if (*s == ch)
             break;
         s++;
@@ -54,18 +58,22 @@ char *strnchr(const char *s, char ch, size_t n) {
     return (char *)s;
 }
 
-void replacechr(char *str, char old, char new) {
+void replacechr(char *str, char old, char new)
+{
     char *ptr;
-    while (1) {
+    while (1)
+    {
         ptr = strchr(str, old);
-        if(ptr == NULL)
+        if (ptr == NULL)
             break;
-        str[(int)(ptr - str)]=new;
+        str[(int)(ptr - str)] = new;
     }
 }
 
-void lowercase(char *str) {
-    while (*str){
+void lowercase(char *str)
+{
+    while (*str)
+    {
         if ('Z' >= *str && *str >= 'A')
             *str = *str - 'A' + 'a';
         str++;
@@ -93,12 +101,20 @@ void myerror(const char *format, ...)
 
 void mywarning(const char *format, ...)
 {
-    fprintf(stderr, ANSI_FG_YELLOW);
+#ifdef DEBUG
+    FILE *fp = stderr;
+#else
+    FILE *fp = fopen("warning.log", "a");
+#endif /* DEBUG */
+    fprintf(fp, ANSI_FG_YELLOW);
     va_list args;
     va_start(args, format);
-    vfprintf(stderr, format, args);
+    vfprintf(fp, format, args);
     va_end(args);
-    fprintf(stderr, ANSI_RESET "\n");
+    fprintf(fp, ANSI_RESET "\n");
+#ifndef DEBUG
+    fclose(fp);
+#endif /* DEBUG */
 }
 
 char *mystrcat(int argc, const char *str1, ...)
@@ -115,6 +131,7 @@ char *mystrcat(int argc, const char *str1, ...)
         // 1 for '\0'
         if (!(ss = realloc(ss, len + 1)))
             myerror("alloc memory for `mystrcat` function failed");
+        assert(ss);
         ss[len] = '\0';
         strcat(ss, s);
     }
@@ -128,7 +145,8 @@ char *pathcat(const char *dir, const char *filename)
     return mystrcat(3, dir, PATH_DELIMITER, filename);
 }
 
-char *url2filename(const char *url) {
+char *url2filename(const char *url)
+{
     size_t url_len = strlen(url);
     const char *begin = url;
     const char *end = strchr(url, '?');
@@ -143,7 +161,8 @@ char *url2filename(const char *url) {
     while (url < end && *end == '/')
         end--;
     // begin after last '/'
-    while (tmp < end) {
+    while (tmp < end)
+    {
         tmp = strchr(begin, '/');
         if (tmp == NULL || tmp > end)
             break;
@@ -183,55 +202,93 @@ size_t hexprint(void *ptr, size_t length)
     return byte_counter;
 }
 
-size_t getfilesize(FILE *fp) {
+size_t getfilesize(FILE *fp)
+{
     fseek(fp, 0, SEEK_END);
     size_t data_len = ftell(fp);
     fseek(fp, 0, SEEK_SET);
-    if (data_len == -1) {
+    if (data_len == -1)
+    {
         fclose(fp);
         myerror("call ftell failed\n");
     }
     return data_len;
 }
 
-int removedir(const char *path) {
-   DIR *d = opendir(path);
-   size_t path_len = strlen(path);
-   int r = -1;
+const char *getdirname(const char *filename) {
+    const char *basename = getbasename(filename);
+    if (basename)
+        return strndup(filename, basename - filename);
+    else
+        return strdup(filename);
+}
 
-   if (d) {
-      struct dirent *p;
-      r = 0;
+const char *getbasename(const char *filename) {
+    const char *basename = strrchr(filename, '/');
+    return basename ? basename + 1 : filename;
+}
 
-      while (!r && (p=readdir(d))) {
-          int r2 = -1;
-          char *buf;
-          size_t len;
+const char *getfilesuffix(const char *filename) {
+    const char *suf = strrchr(filename, '.');
+    return suf ? suf + 1 : NULL;
+}
 
-          /* Skip the names "." and ".." as we don't want to recurse on them. */
-          if (!strcmp(p->d_name, ".") || !strcmp(p->d_name, ".."))
-             continue;
+int makedir(const char *path)
+{
+#ifdef _WIN32
+    return _mkdir(path);
+#else
+    return mkdir(path, 0754);
+#endif /* _WIN32 */
+}
 
-          len = path_len + strlen(p->d_name) + 2;
-          buf = malloc(len);
+int removedir(const char *path)
+{
+    #ifdef _WIN32
+    return -1;
+    #else
+    DIR *d = opendir(path);
+    size_t path_len = strlen(path);
+    int r = -1;
 
-          if (buf) {
-             struct stat statbuf;
-             snprintf(buf, len, "%s/%s", path, p->d_name);
-             if (!stat(buf, &statbuf)) {
-                if (S_ISDIR(statbuf.st_mode))
-                   r2 = removedir(buf);
-                else
-                   r2 = unlink(buf);
-             }
-             free(buf);
-          }
-          r = r2;
-      }
-      closedir(d);
-   }
+    if (d)
+    {
+        struct dirent *p;
+        r = 0;
 
-   if (!r)
-      r = rmdir(path);
-   return r;
+        while (!r && (p = readdir(d)))
+        {
+            int r2 = -1;
+            char *buf;
+            size_t len;
+
+            /* Skip the names "." and ".." as we don't want to recurse on them. */
+            if (!strcmp(p->d_name, ".") || !strcmp(p->d_name, ".."))
+                continue;
+
+            len = path_len + strlen(p->d_name) + 2;
+            buf = malloc(len);
+
+            if (buf)
+            {
+                struct stat statbuf;
+                snprintf(buf, len, "%s/%s", path, p->d_name);
+                if (!stat(buf, &statbuf))
+                {
+                    if (S_ISDIR(statbuf.st_mode))
+                        r2 = removedir(buf);
+                    else
+                        r2 = unlink(buf);
+                }
+                free(buf);
+            }
+            r = r2;
+        }
+        closedir(d);
+    }
+
+    if (!r)
+        r = rmdir(path);
+    return r;
+    #endif /* _WIN32 */
 }

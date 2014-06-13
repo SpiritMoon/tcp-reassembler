@@ -43,6 +43,9 @@
 #define REQUEST_GAP_LEN    6
 #define REQUEST_GAP        "\r\n\r\n\r\n"
 
+#define IP_PORT_FORMAT     "%s.%d-%s.%d"
+// directory
+#define REPORT_DIR         "report"
 #define PCAP_DIR           "pcaps"
 #define REQS_DIR           "requests"
 #define HTTP_DIR           "files"

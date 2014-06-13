@@ -5,6 +5,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include <stdarg.h>
+#include <assert.h>
 
 #ifdef _WIN32
 # include <Windows.h>
@@ -99,10 +100,17 @@ void replacechr(char *str, char old, char new);
 char *mystrdup(const char *s);
 char *mystrcat(int argc, const char *str1, ...);
 char *pathcat(const char *dir, const char *filename);
-char *url2filename(const char *url);
 size_t hexprint(void *ptr, size_t length);
+
+char *url2filename(const char *url);
 size_t getfilesize(FILE *fp);
+const char *getdirname(const char *filename);
+const char *getbasename(const char *filename);
+const char *getfilesuffix(const char *filename);
+int makedir(const char *path);
+#ifndef _WIN32
 int removedir(const char *path);
+#endif
 
 void myerror(const char *format, ...);
 void mywarning(const char *format, ...);
