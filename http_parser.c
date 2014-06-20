@@ -26,7 +26,7 @@
 #include <stddef.h>
 #include <ctype.h>
 #include <stdlib.h>
-#include <string.h>
+#include "string.h"
 #include <limits.h>
 
 #ifndef ULLONG_MAX
@@ -2402,10 +2402,9 @@ http_parser_version(void) {
 char *
 get_http_file_suffix(const char *content_type) {
     char *buf = strdup(content_type);
-    for (int i = 0; buf[i]; i++) {
+    for (int i = 0; buf[i]; i++)
         if ('A' <= buf[i] && buf[i] <= 'Z')
             buf[i] = buf[i] - 'A' + 'a';
-    }
     char *m = strchr(buf, '/');
     char *e = strchr(buf, ';');
     char *(*content_type_map)[2] = {0};

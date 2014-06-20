@@ -1,11 +1,5 @@
 #include "util.h"
 
-bool is_little_endian()
-{
-    unsigned int i = 1;
-    return *(char *)&i;
-}
-
 void *mymemmem(const void *haystack, size_t haystacklen, const void *needle, size_t needlelen)
 {
     const char *ptr = (const char *)haystack;
@@ -207,7 +201,7 @@ size_t getfilesize(FILE *fp)
     fseek(fp, 0, SEEK_END);
     size_t data_len = ftell(fp);
     fseek(fp, 0, SEEK_SET);
-    if (data_len == -1)
+    if (data_len == (size_t)(-1))
     {
         fclose(fp);
         myerror("call ftell failed\n");
@@ -291,4 +285,9 @@ int removedir(const char *path)
         r = rmdir(path);
     return r;
     #endif /* _WIN32 */
+}
+
+tBool is_specific_file(tCString filename, tCString suffix) {
+    tCString dot = strrchr(filename, '.');
+    return dot && !strcmp(dot + 1, suffix);
 }

@@ -31,7 +31,7 @@ HASHTBL *hashtbl_create(hash_size size, hash_size (*hashfunc)(const char *))
 size_t hashtbl_capacity(HASHTBL *hashtbl)
 {
     size_t count = 0;
-    for (int i = 0; i < hashtbl->size; i++)
+    for (hash_size i = 0; i < hashtbl->size; i++)
     {
         if (hashtbl->nodes[i])
             count++;
@@ -78,7 +78,7 @@ int hashtbl_index(HASHTBL *hashtbl, const char *key)
 HASHNODE *hashtbl_get(HASHTBL *hashtbl, const char *key)
 {
     hash_size hash = hashtbl_index(hashtbl, key);
-    if (hash == -1)
+    if (hash == (hash_size)(-1))
         return NULL;
     return hashtbl->nodes[hash];
 }
@@ -90,7 +90,7 @@ void hashtbl_rehash(HASHTBL *hashtbl)
     hash_size newsize = 2 * hashtbl->size;
     assert(newnodes = mycalloc(newsize, sizeof(HASHNODE *)));
 
-    for (int i = 0; i < hashtbl->size; i++)
+    for (int i = 0; i < (int)hashtbl->size; i++)
     {
         if (!oldnodes[i])
             continue;

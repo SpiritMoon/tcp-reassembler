@@ -5,8 +5,6 @@ tcp-reassembler
 
 produce files in pcap file directory
 same name bug
-
-生成有向图
 处理UDP
 fix内存泄漏
 移植到windows

@@ -13,6 +13,7 @@
 #include <errno.h>
 #include <assert.h>
 #include <zlib.h>
+#include "string.h"
 #include "util.h"
 #include "hashtbl.h"
 #include "http_parser.h"
@@ -20,250 +21,15 @@
 #include "list.h"
 
 
-// judge function
-bool is_pcap_file(const char *filename) {
-    const char *sub = strrchr(filename, '.');
-    if (sub == NULL)
-        return FALSE;
-    if (strcmp(sub, ".pcap"))
-        return FALSE;
-    return TRUE;
-}
-
-bool is_txt_file(const char *filename) {
-    const char *sub = strrchr(filename, '.');
-    if (sub == NULL)
-        return FALSE;
-    if (strcmp(sub, ".txt"))
-        return FALSE;
-    return TRUE;
-}
-
-#define is_ip4(protocol) (protocol == PROTOCOL_IP4)
-
-#define is_ip6(protocol) (protocol == PROTOCOL_IP6)
-
-#define is_ip(protocol) (is_ip4(protocol) || is_ip6(protocol))
-
-bool is_tcp(void *ip_packet) {
-    int protocol = get_ip_protocol(ip_packet);
-    if (is_ip4(protocol))
-        return _IP4(ip_packet)->ip_p == PROTOCOL_TCP;
-    else if (is_ip6(protocol))
-        return _IP6(ip_packet)->ip6_nxt == PROTOCOL_TCP;
-    return FALSE;
-}
-
-bool is_udp(void *ip_packet) {
-    int protocol = get_ip_protocol(ip_packet);
-    if (is_ip4(protocol))
-        return _IP4(ip_packet)->ip_p == PROTOCOL_UDP;
-    else if (is_ip6(protocol))
-        return _IP6(ip_packet)->ip6_nxt == PROTOCOL_UDP;
-    return FALSE;
-}
-
-// packet infomation
-#define get_ether_type(pcap_packet) (((int)(pcap_packet[12]) << 8) | (int)pcap_packet[13])
-
-
-// IP
-/*
- * @protocol: IPv4 or IPv6
- */
-void *get_ip_header(byte *pcap_packet) {
-    int offset;
-    switch (get_ether_type(pcap_packet)) {
-        case ETHER_TYPE_8021Q: offset = ETHER_OFFSET_8021Q;break;
-        case ETHER_TYPE_IP4: offset = ETHER_OFFSET_IP4;break;
-        case ETHER_TYPE_IP6: offset = ETHER_OFFSET_IP6;break;
-        default: return NULL;
-    }
-    //skip past the Ethernet II header
-    return (void *)(pcap_packet + offset);
-}
-
-#define get_ip_header_n(node) get_ip_header(((pcap_item *)node->data)->packet)
-
-int get_ip_protocol(void *ip_packet) {
-    char version = *((char *)ip_packet);
-    if (is_little_endian())
-        version = (version & 0xF0) >> 4;
-    else
-        version &= 0x0F;
-
-    return 4 == version ? PROTOCOL_IP4 : PROTOCOL_IP6;
-}
-
-unsigned short get_ip_id(void *ip_packet) {
-    int protocol = get_ip_protocol(ip_packet);
-    if (is_ip4(protocol))
-        return ntohs(_IP4(ip_packet)->ip_id);
-    return 0;
-}
-
-#define get_ip_id_n(node) get_ip_id(get_ip_header_n(node))
-
-/*
- * return something like "192.168.137.1.80--192.168.137.233.8888"
- */
-const char *get_ip_port_pair(void *ip_packet) {
-    int addr_str_len;
-    void *ip_src;
-    void *ip_dst;
-    int protocol = get_ip_protocol(ip_packet);
-
-    if (is_ip4(protocol)) {
-        addr_str_len = INET_ADDRSTRLEN;
-        ip_src = &_IP4(ip_packet)->ip_src;
-        ip_dst = &_IP4(ip_packet)->ip_dst;
-    } else {
-        addr_str_len = INET6_ADDRSTRLEN;
-        ip_src = &_IP6(ip_packet)->ip6_src;
-        ip_dst = &_IP6(ip_packet)->ip6_dst;
-    }
-
-    char buf_src[INET6_ADDRSTRLEN];
-    char buf_dst[INET6_ADDRSTRLEN];
-    inet_ntop(protocol, ip_src, buf_src, addr_str_len);
-    inet_ntop(protocol, ip_dst, buf_dst, addr_str_len);
-
-    tcp_hdr *tcp_packet = get_tcp_header(ip_packet);
-    int port_src = ntohs(tcp_packet->th_sport);
-    int port_dst = ntohs(tcp_packet->th_dport);
-
-    // max port number in string takes 5 bytes
-    char *str = mymalloc((addr_str_len + 5) * 2 + 5);
-    sprintf(str, IP_PORT_FORMAT, buf_src, port_src, buf_dst, port_dst);
-    // replace all ':' to '.' in IPv6
-    for (int i = 0; *(str + i); i++) {
-        if (*(str + i) == ':')
-            *(str + i) = '.';
-    }
-
-    return (const char *)str;
-}
-
-const char *reverse_ip_port_pair(const char *ip_port_pair) {
-    char *pair2 = strstr(ip_port_pair, "-");
-    char *pair1 = strndup(ip_port_pair, pair2 - ip_port_pair);
-    return mystrcat(3, pair2 + 1, "-", pair1);
-}
-
-bool is_same_ip_port(void *ip_packet1, void *ip_packet2) {
-    int protocol1 = get_ip_protocol(ip_packet1);
-    int protocol2 = get_ip_protocol(ip_packet2);
-    if (protocol1 != protocol2)
-        return FALSE;
-
-    size_t addr_len;
-    if (is_ip4(protocol1)) {
-        addr_len = sizeof(_IP4(ip_packet1)->ip_src);
-        if (memcmp(&_IP4(ip_packet1)->ip_src, &_IP4(ip_packet2)->ip_src, addr_len))
-            return FALSE;
-        if (memcmp(&_IP4(ip_packet1)->ip_dst, &_IP4(ip_packet2)->ip_dst, addr_len))
-            return FALSE;
-    } else {
-        addr_len = sizeof(_IP6(ip_packet1)->ip6_src);
-        if (memcmp(&_IP6(ip_packet1)->ip6_src, &_IP6(ip_packet2)->ip6_src, addr_len))
-            return FALSE;
-        if (memcmp(&_IP6(ip_packet1)->ip6_dst, &_IP6(ip_packet2)->ip6_dst, addr_len))
-            return FALSE;
-    }
-
-    tcp_hdr *tcp_packet1 = get_tcp_header(ip_packet1);
-    tcp_hdr *tcp_packet2 = get_tcp_header(ip_packet2);
-    if (tcp_packet1->th_sport != tcp_packet2->th_sport)
-        return FALSE;
-    if (tcp_packet1->th_dport != tcp_packet2->th_dport)
-        return FALSE;
-
-    return TRUE;
-}
-
-const char *get_ip_pair_from_filename(const char *filename) {
-    const char *ip_port_pair = getbasename(filename);
-    const char *suf = strrchr(ip_port_pair, '.');
-    if (suf)
-        ip_port_pair = strndup(ip_port_pair, suf - ip_port_pair);
-    else
-        ip_port_pair = strdup(ip_port_pair);
-
-    char *pair2 = strstr(ip_port_pair, "-");
-    char *pair1 = strndup(ip_port_pair, pair2 - ip_port_pair);
-    pair2 = strdup(pair2 + 1);
-    char *dot1 = strrchr(pair1, '.');
-    char *dot2 = strrchr(pair2, '.');
-    *dot1 = '\0';
-    *dot2 = '\0';
-
-    free((void *)ip_port_pair);
-    ip_port_pair = mystrcat(3, pair1, "-", pair2);
-    free((void *)pair1);
-    free((void *)pair2);
-    return ip_port_pair;
-}
-
-// TCP
-/*
- * @ip_packet: beginning memory address of IP packet, same with IP header
- */
-tcp_hdr *get_tcp_header(void *ip_packet) {
-    tcp_hdr *tcp_packet = NULL;
-    int protocol = get_ip_protocol(ip_packet);
-    if (is_ip4(protocol))
-        tcp_packet = (tcp_hdr *)((char *)(ip_packet) + _IP4(ip_packet)->ip_hl * 4);
-    else if (is_ip6(protocol))
-        // 40 is IPv6 header length
-        tcp_packet = (tcp_hdr *)((char *)(ip_packet) + 40);
-    return tcp_packet;
-}
-
-#define get_tcp_header_p(pcap_packet) get_tcp_header(get_ip_header(pcap_packet))
-
-#define get_tcp_header_n(node) get_tcp_header_p(((pcap_item *)node->data)->packet)
-
-/*
- * return beginning memory address of tcp data
- */
-#define get_tcp_data(tcp_packet) (byte *)((char *)(tcp_packet) + TH_OFF(tcp_packet) * 4)
-
-#define get_tcp_data_n(node) (byte *)((char *)(get_tcp_header_n(node)) + TH_OFF(get_tcp_header_n(node)) * 4)
-
-size_t get_tcp_data_length(void *ip_packet) {
-    size_t ip_len = 0;
-    size_t ip_header_len = 0;
-    size_t tcp_header_len = 0;
-    int protocol = get_ip_protocol(ip_packet);
-
-    if (is_ip4(protocol)) {
-        ip_header_len = _IP4(ip_packet)->ip_hl * 4;
-        ip_len = ntohs(_IP4(ip_packet)->ip_len);
-    } else {
-        ip_len = ntohs(_IP6(ip_packet)->ip6_plen);
-    }
-    // `TH_OFF` specifies the size of the TCP header in 32-bit words
-    tcp_header_len = TH_OFF(get_tcp_header(ip_packet)) * 4;
-
-    return ip_len - (ip_header_len + tcp_header_len);
-}
-
-#define get_tcp_data_length_p(pcap_packet) get_tcp_data_length(get_ip_header(pcap_packet))
-
-#define get_tcp_data_length_n(node) get_tcp_data_length_p(((pcap_item *)node->data)->packet)
-
-#define is_tcp_syn(tcp_packet) (tcp_packet->th_flags & TH_SYN)
-
-#define is_tcp_fin(tcp_packet) (tcp_packet->th_flags & TH_FIN)
-
 
 // hash operation
 /*
  * return a single instance of hash table
  */
 static HASHTBL *_g_hashtbl = NULL;
-HASHTBL *get_hash_table() {
-    if(_g_hashtbl == NULL)
+HASHTBL *get_hash_table()
+{
+    if (_g_hashtbl == NULL)
         _g_hashtbl = hashtbl_create(HASH_SIZE, NULL);
     return _g_hashtbl;
 }
@@ -272,14 +38,15 @@ HASHTBL *get_hash_table() {
  * don't destory hash table until finished all your work!
  */
 #define destory_hash_table() do {       \
-    hashtbl_destroy(get_hash_table());  \
-    _g_hashtbl = NULL;                  \
-} while (0)
+        hashtbl_destroy(get_hash_table());  \
+        _g_hashtbl = NULL;                  \
+    } while (0)
 
-void free_hash_node(void *ptr) {
+void free_hash_node(tVar ptr)
+{
     pcap_item *pcap = (pcap_item *)ptr;
-    free((void *)pcap->packet);
-    free((void *)pcap);
+    free((tVar)pcap->packet);
+    free((tVar)pcap);
 }
 
 #define remove_hash_node(node) hashtbl_remove_n(node, 1, free_hash_node)
@@ -294,7 +61,8 @@ void free_hash_node(void *ptr) {
 /*
  * a pcap item contains a pcap header and a pointer of beignning of packet
  */
-pcap_item *create_pcap_item(const u_char *pcap_packet, struct pcap_pkthdr *pcap_header) {
+pcap_item *create_pcap_item(tByte *pcap_packet, struct pcap_pkthdr *pcap_header)
+{
     size_t pcap_len = pcap_header->caplen;
     u_char *tmp_packet = mymalloc(pcap_len);
     memcpy(tmp_packet, pcap_packet, pcap_len);
@@ -309,17 +77,19 @@ pcap_item *create_pcap_item(const u_char *pcap_packet, struct pcap_pkthdr *pcap_
 /*
  * use (source ip:port, destination ip:port) as key, hash pcap_item
  */
-const char *insert_hash_node(byte *pcap_packet, struct pcap_pkthdr *pcap_header) {
-    void *ip_packet = get_ip_header(pcap_packet);
-    const char *key = get_ip_port_pair(ip_packet);
+tCString insert_hash_node(tByte *pcap_packet, struct pcap_pkthdr *pcap_header)
+{
+    tVar ip_header = get_ip_header(pcap_packet);
+    tCString key = get_ip_port_pair(ip_header);
     pcap_item *pcap = create_pcap_item(pcap_packet, pcap_header);
 
-    if (-1 == hashtbl_insert(get_hash_table(), key, (void *)pcap))
+    if ((hash_size)(-1) == hashtbl_insert(get_hash_table(), key, (tVar)pcap))
         myerror("insert to hash table failed");
     return key;
 }
 
-pcap_t *get_pcap_handle(char *filename) {
+pcap_t *get_pcap_handle(tString filename)
+{
     char errbuf[PCAP_ERRBUF_SIZE];
     pcap_t *handle;
 
@@ -328,7 +98,8 @@ pcap_t *get_pcap_handle(char *filename) {
     return handle;
 }
 
-int cmp_pcap_packet(pcap_item *p1, pcap_item *p2) {
+int cmp_pcap_packet(pcap_item *p1, pcap_item *p2)
+{
     const u_char *packet1 = p1->packet;
     const u_char *packet2 = p2->packet;
     tcp_hdr *t1 = get_tcp_header_p(packet1);
@@ -343,7 +114,8 @@ int cmp_pcap_packet(pcap_item *p1, pcap_item *p2) {
 /*
  * sort pcap packets storging in hash table
  */
-HASHNODE *sort_pcap_packets(HASHNODE *list) {
+HASHNODE *sort_pcap_packets(HASHNODE *list)
+{
     HASHNODE *p, *q, *e, *tail;
     int insize, nmerges, psize, qsize, i;
 
@@ -351,20 +123,23 @@ HASHNODE *sort_pcap_packets(HASHNODE *list) {
         return NULL;
 
     insize = 1;
-    while (1) {
+    while (1)
+    {
         p = list;
         list = NULL;
         tail = NULL;
         /* count number of merges we do in this pass */
         nmerges = 0;
 
-        while (p) {
+        while (p)
+        {
             /* there exists a merge to be done */
             nmerges++;
             /* step `insize' places along from p */
             q = p;
             psize = 0;
-            for (i = 0; i < insize; i++) {
+            for (i = 0; i < insize; i++)
+            {
                 psize++;
                 if (!(q = q->next))
                     break;
@@ -374,19 +149,27 @@ HASHNODE *sort_pcap_packets(HASHNODE *list) {
             qsize = insize;
 
             /* now we have two lists; merge them */
-            while (psize > 0 || (qsize > 0 && q)) {
+            while (psize > 0 || (qsize > 0 && q))
+            {
                 /* decide whether next element of merge comes from p or q */
-                if (psize == 0) {
+                if (psize == 0)
+                {
                     /* p is empty; e must come from q. */
                     e = q; q = q->next; qsize--;
-                } else if (qsize == 0 || !q) {
+                }
+                else if (qsize == 0 || !q)
+                {
                     /* q is empty; e must come from p. */
                     e = p; p = p->next; psize--;
-                } else if (cmp_pcap_packet((pcap_item *)p->data, (pcap_item *)q->data) <= 0) {
+                }
+                else if (cmp_pcap_packet((pcap_item *)p->data, (pcap_item *)q->data) <= 0)
+                {
                     /* First element of p is lower (or same);
                      * e must come from p. */
                     e = p; p = p->next; psize--;
-                } else {
+                }
+                else
+                {
                     /* First element of q is lower; e must come from q. */
                     e = q; q = q->next; qsize--;
                 }
@@ -416,29 +199,31 @@ HASHNODE *sort_pcap_packets(HASHNODE *list) {
 
 // file operation
 
-void record_report(const char *filename, const char *format, ...)
+void record_report(tCString filename, tCString format, ...)
 {
-    const char *filepath = pathcat(REPORT_DIR, filename);
+    tCString filepath = pathcat(REPORT_DIR, filename);
     FILE *fp = fopen(filepath, "a");
     va_list args;
     va_start(args, format);
     vfprintf(fp, format, args);
     va_end(args);
     fclose(fp);
-    free((void *)filepath);
+    free((tVar)filepath);
 }
 
 /*
  * write pcap packet to pcap file
  */
-void write_pcap_to_file(pcap_t *handle, HASHNODE *node) {
-    const char *filename = pathcat(PCAP_DIR, mystrcat(2, node->key, ".pcap"));
+void write_pcap_to_file(pcap_t *handle, HASHNODE *node)
+{
+    tCString filename = pathcat(PCAP_DIR, mystrcat(2, node->key, ".pcap"));
 
     pcap_dumper_t *pd;
     if (!(pd = pcap_dump_open(handle, filename)))
         myerror("opening savefile '%s' failed for writing\n", filename);
 
-    while (node) {
+    while (node)
+    {
         pcap_item *pcap = (pcap_item *)node->data;
         struct pcap_pkthdr *pHeader = &pcap->header;
         const u_char *packet = pcap->packet;
@@ -447,13 +232,15 @@ void write_pcap_to_file(pcap_t *handle, HASHNODE *node) {
     }
 
     pcap_dump_close(pd);
-    free((void *)filename);
+    free((tVar)filename);
 }
 
-void write_pcaps_to_files(pcap_t *handle) {
+void write_pcaps_to_files(pcap_t *handle)
+{
     HASHTBL *hashtbl = get_hash_table();
 
-    for (int i = 0; i < hashtbl->size; i++) {
+    for (hash_size i = 0; i < hashtbl->size; i++)
+    {
         if (!hashtbl->nodes[i])
             continue;
         hashtbl->nodes[i] = sort_pcap_packets(hashtbl->nodes[i]);
@@ -464,7 +251,8 @@ void write_pcaps_to_files(pcap_t *handle) {
 }
 
 
-hash_size combine_hash_nodes(const char *key1, const char *key2) {
+hash_size combine_hash_nodes(tCString key1, tCString key2)
+{
     HASHTBL *hashtbl = get_hash_table();
     hash_size hash1 = get_hash_index(key1);
     hash_size hash2 = get_hash_index(key2);
@@ -472,14 +260,15 @@ hash_size combine_hash_nodes(const char *key1, const char *key2) {
     HASHNODE *node2;
 
     // if one nodes is empty, then return another one
-    if (hash1 == -1 || !(node1 = hashtbl->nodes[hash1]))
+    if (hash1 == (hash_size)(-1) || !(node1 = hashtbl->nodes[hash1]))
         return hash2;
-    if (hash2 == -1 || !(node2 = hashtbl->nodes[hash2]))
+    if (hash2 == (hash_size)(-1) || !(node2 = hashtbl->nodes[hash2]))
         return hash1;
 
     // make sure of node1 being requester and node2 being responser
     unsigned char flags = get_tcp_header_n(node1)->th_flags;
-    if ((flags & TH_SYN) && (flags & TH_ACK)) {
+    if ((flags & TH_SYN) && (flags & TH_ACK))
+    {
         hash_size tmp = hash1;
         hash1 = hash2;
         hash2 = tmp;
@@ -487,7 +276,8 @@ hash_size combine_hash_nodes(const char *key1, const char *key2) {
 
     node2 = hashtbl->nodes[hash2];
     // exchange seq and ack, and append node2 to node1
-    while (node2) {
+    while (node2)
+    {
         tcp_hdr *tcp_packet2 = get_tcp_header_n(node2);
         tcp_seq seq2 = tcp_packet2->th_seq;
         tcp_seq ack2 = tcp_packet2->th_ack;
@@ -502,18 +292,20 @@ hash_size combine_hash_nodes(const char *key1, const char *key2) {
 
     hashtbl->nodes[hash1] = node1 = sort_pcap_packets(hashtbl->nodes[hash1]);
     // recovery seq and ack in original node2
-    while (node1) {
-        void *ip_packet2 = get_ip_header_n(node1);
-        const char *tmp = get_ip_port_pair(ip_packet2);
-        if (!strcmp(key2, tmp)) {
-            tcp_hdr *tcp_packet2 = get_tcp_header(ip_packet2);
+    while (node1)
+    {
+        tVar ip_header2 = get_ip_header_n(node1);
+        tCString tmp = get_ip_port_pair(ip_header2);
+        if (!strcmp(key2, tmp))
+        {
+            tcp_hdr *tcp_packet2 = get_tcp_header(ip_header2);
             tcp_seq seq2 = tcp_packet2->th_seq;
             tcp_seq ack2 = tcp_packet2->th_ack;
             tcp_packet2->th_seq = ack2;
             tcp_packet2->th_ack = seq2;
         }
         node1 = node1->next;
-        free((void *)tmp);
+        free((tVar)tmp);
     }
 
     node1 = hashtbl->nodes[hash1];
@@ -525,33 +317,37 @@ hash_size combine_hash_nodes(const char *key1, const char *key2) {
     return hash1;
 }
 
-bool is_same_tcp_packet_n(HASHNODE *node1, HASHNODE *node2) {
-    void *ip_packet1 = get_ip_header_n(node1);
-    void *ip_packet2 = get_ip_header_n(node2);
-    tcp_hdr *ctcp_packet = get_tcp_header(ip_packet1);
-    tcp_hdr *ntcp_packet = get_tcp_header(ip_packet2);
+tBool is_same_tcp_packet_n(HASHNODE *node1, HASHNODE *node2)
+{
+    tVar ip_header1 = get_ip_header_n(node1);
+    tVar ip_header2 = get_ip_header_n(node2);
+    tcp_hdr *ctcp_packet = get_tcp_header(ip_header1);
+    tcp_hdr *ntcp_packet = get_tcp_header(ip_header2);
 
     // TODO: forget this function, I can't find any solution to do this.
     return 0;
-    return is_same_ip_port(ip_packet1, ip_packet2)
+    return is_same_ip_port(ip_header1, ip_header2)
            && ctcp_packet->th_seq == ntcp_packet->th_seq
            && ctcp_packet->th_ack == ntcp_packet->th_ack;
 }
 
-HASHNODE *combine_tcp_packet(hash_size index) {
+HASHNODE *combine_tcp_packet(hash_size index)
+{
     HASHTBL *hashtbl = get_hash_table();
     HASHNODE *node = hashtbl->nodes[index];
     HASHNODE *prev = node;
     HASHNODE *next;
 
-    bool should_drop;
-    while (node) {
+    tBool should_drop;
+    while (node)
+    {
         next = node->next;
         // if they are duplication packet, then drop it
         should_drop = next ? is_same_tcp_packet_n(node, next) : FALSE;
         // if no data, then skip node
         should_drop |= (0 == get_tcp_data_length_n(node));
-        if (should_drop) {
+        if (should_drop)
+        {
             if (hashtbl->nodes[index] == node)
                 hashtbl->nodes[index] = next;
             else
@@ -559,7 +355,9 @@ HASHNODE *combine_tcp_packet(hash_size index) {
             free(node->key);
             free_hash_node(node->data);
             free(node);
-        } else {
+        }
+        else
+        {
             prev = node;
         }
         node = next;
@@ -571,17 +369,19 @@ HASHNODE *combine_tcp_packet(hash_size index) {
 /*
  * write tcp data (maybe contains HTTP request and response) to txt file
  */
-size_t write_tcp_data_to_file(FILE *fp, byte *data_ptr, size_t data_len) {
+size_t write_tcp_data_to_file(FILE *fp, tByte *data_ptr, size_t data_len)
+{
     if (data_len && data_len != fwrite(data_ptr, 1, data_len, fp))
         mylogging("write wrong size of tcp data to file\n");
     return data_len;
 }
 
-size_t write_tcp_data_to_file_n(FILE *fp, HASHNODE *node) {
-    void *ip_packet = get_ip_header_n(node);
-    tcp_hdr *tcp_packet = get_tcp_header(ip_packet);
-    size_t data_len = get_tcp_data_length(ip_packet);
-    byte *data_ptr = get_tcp_data(tcp_packet);
+size_t write_tcp_data_to_file_n(FILE *fp, HASHNODE *node)
+{
+    tVar ip_header = get_ip_header_n(node);
+    tcp_hdr *tcp_header = get_tcp_header(ip_header);
+    size_t data_len = get_tcp_data_length(ip_header);
+    tByte *data_ptr = get_tcp_data(tcp_header);
     size_t nwrite = write_tcp_data_to_file(fp, data_ptr, data_len);
 
     HASHNODE *next = node->next;
@@ -593,39 +393,41 @@ size_t write_tcp_data_to_file_n(FILE *fp, HASHNODE *node) {
 
 // read pcap files to memory
 #define create_hash_from_directory(dirname) do {                    \
-    DIR *dir;                                                       \
-    struct dirent *ent;                                             \
-    if (!(dir = opendir(dirname)))                                  \
-        myerror("open directory '%s' failed\n", dirname);           \
-    while ((ent = readdir(dir)) != NULL) {                          \
-        char *filename = ent->d_name;                               \
-        if (!is_pcap_file(filename))                                \
-            continue;                                               \
-        char *pcap_filename = pathcat(dirname, filename);           \
-                                                                    \
-        const u_char *pcap_packet;                                  \
-        struct pcap_pkthdr header;                                  \
-        pcap_t *handle = get_pcap_handle(pcap_filename);            \
-        while (NULL != (pcap_packet = pcap_next(handle, &header)))  \
-            insert_hash_node(pcap_packet, &header);                 \
-                                                                    \
-        pcap_close(handle);                                         \
-        free(pcap_filename);                                        \
-    }                                                               \
-    closedir(dir);                                                  \
-} while (0)
+        DIR *dir;                                                       \
+        struct dirent *ent;                                             \
+        if (!(dir = opendir(dirname)))                                  \
+            myerror("open directory '%s' failed\n", dirname);           \
+        while ((ent = readdir(dir)) != NULL) {                          \
+            tString filename = ent->d_name;                               \
+            if (!is_specific_file(filename, "pcap"))                                \
+                continue;                                               \
+            tString pcap_filename = pathcat(dirname, filename);           \
+            \
+            const u_char *pcap_packet;                                  \
+            struct pcap_pkthdr header;                                  \
+            pcap_t *handle = get_pcap_handle(pcap_filename);            \
+            while (NULL != (pcap_packet = pcap_next(handle, &header)))  \
+                insert_hash_node(pcap_packet, &header);                 \
+            \
+            pcap_close(handle);                                         \
+            free(pcap_filename);                                        \
+        }                                                               \
+        closedir(dir);                                                  \
+    } while (0)
 
-void write_tcp_data_to_files() {
+void write_tcp_data_to_files()
+{
     create_hash_from_directory(PCAP_DIR);
     // write http requests and responses
     HASHTBL *hashtbl = get_hash_table();
     HASHNODE *node1;
     hash_size hash1;
-    const char *key1;
-    const char *key2;
-    char *filename;
+    tCString key1;
+    tCString key2;
+    tString filename;
 
-    for (int i = 0; i < hashtbl->size; i++) {
+    for (hash_size i = 0; i < hashtbl->size; i++)
+    {
         node1 = hashtbl->nodes[i];
         if (!node1)
             continue;
@@ -641,7 +443,8 @@ void write_tcp_data_to_files() {
             continue;
         filename = pathcat(REQS_DIR, mystrcat(2, node1->key, ".txt"));
         FILE *fp = fopen(filename, "wb");
-        while (node1) {
+        while (node1)
+        {
             write_tcp_data_to_file_n(fp, node1);
             node1 = node1->next;
         }
@@ -656,28 +459,31 @@ void write_tcp_data_to_files() {
 #undef create_hash_from_directory
 
 // HTTP parse
-typedef struct {
-    bool on_continue;
-    bool on_request;
-    bool on_content_type;
-    bool on_content_encoding;
-    bool on_host;
-    bool is_gzip_encoding;
-    char *host;
-    char *content_type;
-    char *url;
-    char *data;
+typedef struct
+{
+    tBool on_continue;
+    tBool on_request;
+    tBool on_content_type;
+    tBool on_content_encoding;
+    tBool on_host;
+    tBool is_gzip_encoding;
+    tString host;
+    tString content_type;
+    tString url;
+    tString data;
     size_t data_len;
 } HTTP_info;
 
 static HTTP_info _g_http;
 
-void _init_http_info() {
+void _init_http_info()
+{
     memset(&_g_http, 0, sizeof(_g_http));
     _g_http.on_request = TRUE;
 }
 
-void _reset_http_info() {
+void _reset_http_info()
+{
     if (_g_http.content_type)
         free(_g_http.content_type);
     if (_g_http.url)
@@ -693,14 +499,19 @@ void _reset_http_info() {
     _g_http.on_continue = TRUE;
 }
 
-int _on_header_field(http_parser* _, const char* at, size_t length) {
+int _on_header_field(http_parser *_, tCString at, size_t length)
+{
+    // do nothing, just for kill warning
+    (void)_;
     _g_http.on_content_type = !strncmp("Content-Type", at, length);
     _g_http.on_content_encoding = !strncmp("Content-Encoding", at, length);
     _g_http.on_host = !strncmp("Host", at, length);
     return 0;
 }
 
-int _on_header_value(http_parser* _, const char* at, size_t length) {
+int _on_header_value(http_parser *_, tCString at, size_t length)
+{
+    (void)_;
     if (_g_http.on_content_type)
         _g_http.content_type = strndup(at, length);
     else if (_g_http.on_content_encoding)
@@ -710,19 +521,26 @@ int _on_header_value(http_parser* _, const char* at, size_t length) {
     return 0;
 }
 
-int _on_headers_complete(http_parser* _) {
+int _on_headers_complete(http_parser *_)
+{
+    (void)_;
     _g_http.on_continue = TRUE;
     return 0;
 }
 
-int _on_url(http_parser* _, const char* at, size_t length) {
+int _on_url(http_parser *_, tCString at, size_t length)
+{
+    (void)_;
     if (_g_http.on_request)
         _g_http.url = strndup(at, length);
     return 0;
 }
 
-int _on_body(http_parser* _, const char* at, size_t length) {
-    if (!_g_http.on_request) {
+int _on_body(http_parser *_, tCString at, size_t length)
+{
+    (void)_;
+    if (!_g_http.on_request)
+    {
         _g_http.data = mymalloc(length);
         memcpy(_g_http.data, at, length);
         _g_http.data_len = length;
@@ -730,7 +548,8 @@ int _on_body(http_parser* _, const char* at, size_t length) {
     return 0;
 }
 
-size_t gzip_fwrite(void *data, size_t data_len, FILE *dest) {
+size_t gzip_fwrite(tVar data, size_t data_len, FILE *dest)
+{
     int ret;
     unsigned have;
     z_stream strm;
@@ -747,21 +566,24 @@ size_t gzip_fwrite(void *data, size_t data_len, FILE *dest) {
 
     /* decompress until deflate stream ends or end of file */
     size_t done = 0;
-    do {
+    do
+    {
         strm.avail_in = MIN(data_len - done, CHUNK);
         strm.next_in = (unsigned char *)data + done;
         done += strm.avail_in;
 
         /* run inflate() on input until output buffer not full */
-        do {
+        do
+        {
             strm.avail_out = CHUNK;
             strm.next_out = out;
             ret = inflate(&strm, Z_NO_FLUSH);
             /* state not clobbered */
-            switch (ret) {
+            switch (ret)
+            {
             case Z_NEED_DICT:
                 ret = Z_DATA_ERROR;
-                // fall through
+            // fall through
             case Z_STREAM_ERROR:
             case Z_DATA_ERROR:
             case Z_MEM_ERROR:
@@ -770,16 +592,19 @@ size_t gzip_fwrite(void *data, size_t data_len, FILE *dest) {
             have = CHUNK - strm.avail_out;
             if (fwrite(out, 1, have, dest) != have || ferror(dest))
                 goto END;
-        } while (strm.avail_out == 0);
+        }
+        while (strm.avail_out == 0);
 
-    /* done when inflate() says it's done */
-    } while (done < data_len && ret != Z_STREAM_END);
+        /* done when inflate() says it's done */
+    }
+    while (done < data_len && ret != Z_STREAM_END);
 
 END:
     /* clean up and return */
     (void)inflateEnd(&strm);
-    const char *prefix = ANSI_FG_CYAN "gzip_fwrite" ANSI_RESET;
-    switch (ret) {
+    tCString prefix = ANSI_FG_CYAN "gzip_fwrite" ANSI_RESET;
+    switch (ret)
+    {
     case Z_ERRNO:
         if (ferror(dest))
             mywarning("%s: writing stdout\n", prefix);
@@ -797,59 +622,64 @@ END:
         mywarning("%s: zlib version mismatch!\n", prefix);
         break;
     case Z_STREAM_END:
-        // fall through
+    // fall through
     default:
         break;
     }
     return MIN(done, data_len);
 }
 
-char *get_http_filename(const char *url, const char *suf) {
-    char *basename = url2filename(url);
-    if (!strrchr(basename, '.')) {
-        char *tmp = basename;
+tString get_http_filename(tCString url, tCString suf)
+{
+    tString basename = url2filename(url);
+    if (!strrchr(basename, '.'))
+    {
+        tString tmp = basename;
         basename = mystrcat(3, basename, ".", suf);
         free(tmp);
     }
     return basename;
 }
 
-const char *create_http_dirs(const char *rootdir) {
-    const char *dirpath = pathcat(HTTP_DIR, rootdir);
-    if (0 != makedir(dirpath)) {
+tCString create_http_dirs(tCString rootdir)
+{
+    tCString dirpath = pathcat(HTTP_DIR, rootdir);
+    if (0 != makedir(dirpath))
+    {
         if (errno == EEXIST)
             return dirpath;
         myerror("create directory %s failed", dirpath);
     }
-    const char *image_dir = pathcat(dirpath, "images");
-    const char *js_dir = pathcat(dirpath, "js");
-    const char *css_dir = pathcat(dirpath, "css");
+    tCString image_dir = pathcat(dirpath, "images");
+    tCString js_dir = pathcat(dirpath, "js");
+    tCString css_dir = pathcat(dirpath, "css");
     makedir(image_dir);
     makedir(js_dir);
     makedir(css_dir);
-    free((void *)image_dir);
-    free((void *)js_dir);
-    free((void *)css_dir);
+    free((tVar)image_dir);
+    free((tVar)js_dir);
+    free((tVar)css_dir);
     return dirpath;
 }
 
-const char *write_http_block_to_dir(const char *dirpath) {
+tCString write_http_block_to_dir(tCString dirpath)
+{
     if (!_g_http.url || !_g_http.data || !_g_http.content_type)
         return NULL;
-    char *suffix = get_http_file_suffix(_g_http.content_type);
+    tString suffix = get_http_file_suffix(_g_http.content_type);
     if (!strcmp(suffix, "js"))
         dirpath = pathcat(dirpath, "js");
     else if (!strcmp(suffix, "css"))
         dirpath = pathcat(dirpath, "css");
     else if (!strcmp(suffix, "jpg")
-            ||!strcmp(suffix, "jpeg")
-            ||!strcmp(suffix, "png")
-            ||!strcmp(suffix, "gif"))
+             || !strcmp(suffix, "jpeg")
+             || !strcmp(suffix, "png")
+             || !strcmp(suffix, "gif"))
         dirpath = pathcat(dirpath, "images");
     else
         dirpath = strdup(dirpath);
-    char *basename = get_http_filename(_g_http.url, suffix);
-    char *filename = pathcat(dirpath, basename);
+    tString basename = get_http_filename(_g_http.url, suffix);
+    tString filename = pathcat(dirpath, basename);
 
     FILE *fp = fopen(filename, "ab");
     if (!fp)
@@ -862,34 +692,36 @@ const char *write_http_block_to_dir(const char *dirpath) {
         wlen = fwrite(_g_http.data, 1, _g_http.data_len, fp);
     if (wlen != _g_http.data_len)
         mywarning("should write %u bytes to %s, but %u done\n", _g_http.data_len, filename, wlen);
-    free((void *)dirpath);
+    free((tVar)dirpath);
     free(filename);
     free(suffix);
     fclose(fp);
     return basename;
 }
 
-void write_http_data_to_dir(const char *data, size_t data_len, const char *filename) {
+void write_http_data_to_dir(tCString data, size_t data_len, tCString filename)
+{
     // init http parser
     http_parser_settings settings;
     http_parser parser;
     _init_http_info();
 
-    const char *srcname = getbasename(filename);
-    const char *begin = data;
-    const char *end;
-    const char *ptr;
-    void *token;
+    tCString srcname = getbasename(filename);
+    tCString begin = data;
+    tCString end;
+    tCString ptr;
+    tVar token;
     size_t left_len;
     size_t token_len;
 
-    do {
+    do
+    {
         if (!data_len)
             break;
         // get a request or response string
         left_len = data + data_len - begin;
-        end = (const char *)mymemmem(begin, left_len, REQUEST_GAP, REQUEST_GAP_LEN);
-        token_len = (end == NULL) ? (left_len) : (end - begin);
+        end = (tCString)mymemmem(begin, left_len, REQUEST_GAP, REQUEST_GAP_LEN);
+        token_len = (end == NULL) ? (left_len) : (size_t)(end - begin);
         token = mymalloc(token_len);
         memcpy(token, begin, token_len);
         ptr = begin;
@@ -905,8 +737,9 @@ void write_http_data_to_dir(const char *data, size_t data_len, const char *filen
         size_t nparsed = http_parser_execute(&parser, &settings, token, token_len);
         free(token);
 
-        if (nparsed != token_len) {
-            #ifndef DEBUG
+        if (nparsed != token_len)
+        {
+#ifndef DEBUG
             // #ifdef DEBUG
             // pretty debug mylogging
             mywarning(ANSI_FG_GREEN "[0x%08X]:" ANSI_RESET
@@ -915,7 +748,7 @@ void write_http_data_to_dir(const char *data, size_t data_len, const char *filen
                       (unsigned int)(begin + nparsed - data),
                       srcname,
                       http_errno_description(HTTP_PARSER_ERRNO(&parser)));
-            #endif /* DEBUG */
+#endif /* DEBUG */
         }
         // move begin cursor to next scan
         ptr += nparsed;
@@ -926,35 +759,41 @@ void write_http_data_to_dir(const char *data, size_t data_len, const char *filen
         begin = MAX(begin, ptr);
 
         // update _g_http state
-        if (!_g_http.on_request) {
-            const char *host = _g_http.host;
-            if (host) {
-                const char *dirpath = create_http_dirs(host);
-                const char *http_filename = write_http_block_to_dir(dirpath);
-                if (http_filename) {
+        if (!_g_http.on_request)
+        {
+            tCString host = _g_http.host;
+            if (host)
+            {
+                tCString dirpath = create_http_dirs(host);
+                tCString http_filename = write_http_block_to_dir(dirpath);
+                if (http_filename)
+                {
                     record_report("GET_to.txt", "%s->%s\n", srcname, http_filename);
                 }
-                free((void *)dirpath);
-                free((void *)http_filename);
+                free((tVar)dirpath);
+                free((tVar)http_filename);
             }
             _reset_http_info();
         }
         _g_http.on_request = !_g_http.on_request;
-    } while (end && left_len > 0);
+    }
+    while (end && left_len > 0);
 
     _reset_http_info();
 }
 
-void write_http_data_to_dirs() {
+void write_http_data_to_dirs()
+{
     DIR *dir;
     struct dirent *ent;
     if (!(dir = opendir(REQS_DIR)))
         myerror("open directory '" REQS_DIR "' failed");
 
-    while ((ent = readdir(dir)) != NULL) {
+    while ((ent = readdir(dir)) != NULL)
+    {
         // deal with filename
-        const char *filename = ent->d_name;
-        if (!is_txt_file(filename))
+        tCString filename = ent->d_name;
+        if (!is_specific_file(filename, "txt"))
             continue;
         // a directory stores a website's HTTP files
         filename = pathcat(REQS_DIR, filename);
@@ -962,11 +801,14 @@ void write_http_data_to_dirs() {
         if (!fp)
             mylogging("can't open %s for http parse", filename);
         size_t data_len = getfilesize(fp);
-        void *data = mymalloc(data_len);
-        if (fread(data, 1, data_len, fp) != data_len) {
+        tVar data = mymalloc(data_len);
+        if (fread(data, 1, data_len, fp) != data_len)
+        {
             free(data);
             mylogging("couldn't read entire file\n");
-        } else {
+        }
+        else
+        {
             write_http_data_to_dir(data, data_len, filename);
             free(data);
         }
@@ -978,27 +820,30 @@ void write_http_data_to_dirs() {
 
 
 static list_t *_file_list = NULL;
-list_t *get_file_list() {
+list_t *get_file_list()
+{
     if (!_file_list)
         _file_list = list_new();
     return _file_list;
 }
 
-void list_insert_head(const char *filename) {
-    const char *buf = strdup(filename);
-    list_node_t *node = list_node_new((void *)buf);
+void list_insert_head(tCString filename)
+{
+    tCString buf = strdup(filename);
+    list_node_t *node = list_node_new((tVar)buf);
     list_lpush(get_file_list(), node);
 }
 
-void list_insert_tail(const char *filename) {
-    const char *buf = strdup(filename);
-    list_node_t *node = list_node_new((void *)buf);
+void list_insert_tail(tCString filename)
+{
+    tCString buf = strdup(filename);
+    list_node_t *node = list_node_new((tVar)buf);
     list_rpush(get_file_list(), node);
 }
 
-void traverse_http_diretory(const char *path) {
+void traverse_http_diretory(tCString path)
+{
     DIR *d = opendir(path);
-    size_t path_len = strlen(path);
 
     if (d)
     {
@@ -1008,15 +853,17 @@ void traverse_http_diretory(const char *path) {
             if (!strcmp(p->d_name, ".") || !strcmp(p->d_name, ".."))
                 continue;
 
-            size_t len = path_len + strlen(p->d_name) + 2;
-            char *buf = pathcat(path, p->d_name);
+            tString buf = pathcat(path, p->d_name);
             struct stat statbuf;
             if (!stat(buf, &statbuf))
             {
-                if (S_ISDIR(statbuf.st_mode)) {
+                if (S_ISDIR(statbuf.st_mode))
+                {
                     traverse_http_diretory(buf);
-                } else {
-                    const char *suffix = getfilesuffix(buf);
+                }
+                else
+                {
+                    tCString suffix = getfilesuffix(buf);
                     if (!strcmp(suffix, "htm") || !strcmp(suffix, "html"))
                         list_insert_head(buf);
                     else
@@ -1030,7 +877,8 @@ void traverse_http_diretory(const char *path) {
 }
 
 
-void init_environment(int argc, char **argv) {
+void init_environment(int argc, char **argv)
+{
     if (argc < 2)
         myerror("usage: %s [file]", argv[0]);
     removedir(REPORT_DIR);
@@ -1043,41 +891,29 @@ void init_environment(int argc, char **argv) {
     makedir(HTTP_DIR);
 }
 
-int main(int argc, char **argv) {
+int main(int argc, char **argv)
+{
     const u_char *pcap_packet;
     struct pcap_pkthdr header;
     pcap_t *handle;
 
-#ifdef DEBUG
-    char *dir = "/Users/fz/Downloads";
-    char *files[] = {
-        // "test.pcap",
-        "test2.pcap",
-        // "hust.pcap",
-        // "baidu.pcap",
-        // "normal.pcap",
-        // "wifi.pcap",
-        ""
-    };
-    for (int i = 0; *files[i]; i++) {
-    init_environment(2, argv);
-    handle = get_pcap_handle(pathcat(dir, files[i]));
-#else
     init_environment(argc, argv);
     handle = get_pcap_handle(argv[1]);
-#endif
-
-    while (NULL != (pcap_packet = pcap_next(handle, &header))) {
-        void *ip_packet = get_ip_header(pcap_packet);
+    while (NULL != (pcap_packet = pcap_next(handle, &header)))
+    {
+        tVar ip_header = get_ip_header(pcap_packet);
         // skip if neither IPv4 nor IPv6
-        if (NULL == ip_packet)
+        if (NULL == ip_header)
             continue;
         // TODO: skip IPv6 because I can't hold it ╮(╯_╰)╭
-        if (is_ip6(get_ip_protocol(ip_packet)))
+        if (is_ip6(get_ip_protocol(ip_header)))
             continue;
-        if (is_tcp(ip_packet)) {
+        if (is_tcp(ip_header))
+        {
             insert_hash_node(pcap_packet, &header);
-        } else if (is_udp(ip_packet)) {
+        }
+        else if (is_udp(ip_header))
+        {
             // TODO: deal with UDP
         }
     }
@@ -1089,26 +925,29 @@ int main(int argc, char **argv) {
     struct dirent *ent;
     if (!(dir = opendir(HTTP_DIR)))
         myerror("open directory '%s' failedn", HTTP_DIR);
-    while ((ent = readdir(dir)) != NULL) {
-        char *filename = ent->d_name;
+    while ((ent = readdir(dir)) != NULL)
+    {
+        tString filename = ent->d_name;
         if (!strcmp(filename, ".") || !strcmp(filename, ".."))
             continue;
-        const char *basename;
-        const char *dirname;
+        tCString basename;
+        tCString dirname;
         filename = pathcat(HTTP_DIR, filename);
         traverse_http_diretory(filename);
 
         list_node_t *node = get_file_list()->head;
-        if (node) {
+        if (node)
+        {
             dirname = getdirname(node->val);
             record_report("files.txt", "%s: ", dirname);
-            free(dirname);
+            free((tVar)dirname);
 
             basename = getbasename(node->val);
-            const char *suffix = getfilesuffix(basename);
+            tCString suffix = getfilesuffix(basename);
             if (!strcmp(suffix, "htm") || !strcmp(suffix, "html"))
                 record_report("refer.txt", "%s: ", basename);
-            else {
+            else
+            {
                 if (get_file_list()->len == 1)
                     record_report("refer.txt", "%s", basename);
                 else
@@ -1120,12 +959,16 @@ int main(int argc, char **argv) {
             else
                 record_report("files.txt", "%s", basename);
         }
-        while (node) {
+        while (node)
+        {
             basename = getbasename(node->val);
-            if (node->next) {
+            if (node->next)
+            {
                 record_report("refer.txt", "%s + ", basename);
                 record_report("files.txt", "%s + ", basename);
-            } else {
+            }
+            else
+            {
                 record_report("refer.txt", "%s", basename);
                 record_report("files.txt", "%s", basename);
             }
@@ -1133,16 +976,11 @@ int main(int argc, char **argv) {
         }
         record_report("refer.txt", "\n\n");
         record_report("files.txt", "\n\n");
-        free((void *)filename);
+        free((tVar)filename);
         list_destroy(get_file_list());
         _file_list = NULL;
     }
-    break;
     closedir(dir);
-
     pcap_close(handle);
-#ifdef DEBUG
-    }
-#endif
     return 0;
 }

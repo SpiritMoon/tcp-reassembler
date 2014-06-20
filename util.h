@@ -1,11 +1,12 @@
-#ifndef _UTIL_H_INCLUDE_
-#define _UTIL_H_INCLUDE_
+#ifndef _UTIL_H_
+#define _UTIL_H_
 
 #include <stdio.h>
 #include <string.h>
 #include <stdlib.h>
 #include <stdarg.h>
 #include <assert.h>
+#include "mytypes.h"
 
 #ifdef _WIN32
 # include <Windows.h>
@@ -15,7 +16,7 @@
 #endif /* _WIN32 */
 
 #ifndef DEBUG
-#define DEBUG
+// #define DEBUG
 #endif
 #ifdef DEBUG
 # define mylogging(...)      myerror(__VA_ARGS__)
@@ -61,12 +62,7 @@
 # define ANSI_BG_WHITE       ""
 #endif /* DEBUG */
 
-#ifndef TRUE
-#define TRUE  1
-#endif
-#ifndef FALSE
-#define FALSE 0
-#endif
+
 #ifndef CHUNK
 #undef  CHUNK
 #endif
@@ -88,8 +84,6 @@
 typedef int bool;
 typedef const unsigned char byte;
 
-bool is_little_endian();
-
 void *mymemmem(const void *haystack, size_t haystacklen, const void *needle, size_t needlelen);
 void *mymalloc(size_t size);
 void *mycalloc(size_t count, size_t size);
@@ -102,6 +96,7 @@ char *mystrcat(int argc, const char *str1, ...);
 char *pathcat(const char *dir, const char *filename);
 size_t hexprint(void *ptr, size_t length);
 
+tBool is_specific_file(tCString filename, tCString suffix);
 char *url2filename(const char *url);
 size_t getfilesize(FILE *fp);
 const char *getdirname(const char *filename);
@@ -116,4 +111,4 @@ void myerror(const char *format, ...);
 void mywarning(const char *format, ...);
 
 
-#endif /* _UTIL_H_INCLUDE_ */
+#endif /* _UTIL_H_ */

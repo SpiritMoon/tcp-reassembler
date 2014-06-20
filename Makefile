@@ -1,28 +1,25 @@
-all: main
+CC=cc
+CFLAGS= -Wall -Wextra -g -c -std=c99 -I lib
+PDEFINE= -D_BSD_SOURCE
+LDFLAGS= -lpcap -lz
+SOURCES= main.c myhttp.c http_parser.c mytcp.c myudp.c myip.c mynetwork.c util.c hashtbl.c list.c
+OBJECTS=$(SOURCES:.c=.o)
+EXECUTABLE=main
 
-main: main.o util.o hashtbl.o list.o http_parser.o
-	cc -std=c99 -o main util.o http_parser.o hashtbl.o list.o main.o -lpcap -lz -Wall
+all: $(SOURCES) $(EXECUTABLE)
 
-util.o: util.c util.h
-	cc -std=c99 -o util.o -c util.c -g
+$(EXECUTABLE): $(OBJECTS)
+	$(CC) $(LDFLAGS) $(OBJECTS) -o $@
 
-http_parser.o: http_parser.c http_parser.h
-	cc -std=c99 -o http_parser.o -c http_parser.c -g
-
-hashtbl.o: hashtbl.c hashtbl.h
-	cc -std=c99 -o hashtbl.o -c hashtbl.c -g
-
-list.o: list.c list.h
-	cc -std=c99 -o list.o -c list.c -g
-
-main.o: main.c main.h hashtbl.h 
-	cc -std=c99 -o main.o -c main.c -g 
+.c.o:
+	$(CC) $(CFLAGS) $< -o $@
 
 clean:
-	rm -rf *.o main a.out 
+	rm -f *.o $(EXECUTABLE)
 
 run:
-	./main
+	./$(EXECUTABLE)
 
 d:
 	make clean && make && make run
+
