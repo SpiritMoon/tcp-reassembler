@@ -6,12 +6,12 @@
 #include <stdlib.h>
 #include <stdarg.h>
 #include <assert.h>
+#include "dirent.h"
 #include "mytypes.h"
 
 #ifdef _WIN32
 # include <Windows.h>
 #else
-# include <dirent.h>
 # include <sys/stat.h>
 #endif /* _WIN32 */
 

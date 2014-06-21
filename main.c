@@ -13,14 +13,18 @@
 #include <errno.h>
 #include <assert.h>
 #include <zlib.h>
+#include "lib/dirent.h"
+#include "mytypes.h"
+#include "mynetwork.h"
+#include "myip.h"
+#include "mytcp.h"
+#include "myudp.h"
 #include "string.h"
 #include "util.h"
 #include "hashtbl.h"
 #include "http_parser.h"
-#include "main.h"
 #include "list.h"
-
-
+#include "main.h"
 
 // hash operation
 /*
@@ -897,8 +901,13 @@ int main(int argc, char **argv)
     struct pcap_pkthdr header;
     pcap_t *handle;
 
+#ifdef DEBUG
+    init_environment(2, argv);
+    handle = get_pcap_handle("/Users/fz/Downloads/test.pcap");
+#else
     init_environment(argc, argv);
     handle = get_pcap_handle(argv[1]);
+#endif
     while (NULL != (pcap_packet = pcap_next(handle, &header)))
     {
         tVar ip_header = get_ip_header(pcap_packet);
