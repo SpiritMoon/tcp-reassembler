@@ -10,7 +10,6 @@
  *         [tcp_data]     len stored in ip header
  */
 #include <stdio.h>
-#include <assert.h>
 #include <string.h>
 #include <dirent.h>
 #include "file.h"
@@ -21,9 +20,6 @@
 #include "udp.h"
 #include "http.h"
 #include "main.h"
-
-#define get_ip_header_n(node) get_ip_header(((pcap_item *)node->data)->packet)
-#define get_ip_id_n(node) get_ip_id(get_ip_header_n(node))
 
 // hash operation
 void free_pcap_item(tVar ptr)
@@ -183,7 +179,6 @@ void classify_pcap_packets_in_hashtbl()
     }
 }
 
-
 void write_pcap_to_file(pcap_t *handle, HASHNODE *node, tCString dirpath)
 {
     tCString filename = pathcat(dirpath, mystrcat(2, node->key, ".pcap"));
@@ -208,6 +203,7 @@ void write_pcaps_to_files(pcap_t *handle, tCString dirpath)
     while (node = hashtbl_next(&hashitr))
         write_pcap_to_file(handle, node, dirpath);
 }
+
 
 size_t combine_tcp_nodes(tCString key1, tCString key2)
 {
@@ -266,7 +262,7 @@ size_t combine_tcp_nodes(tCString key1, tCString key2)
         safe_free(tmp);
     }
 
-    assert(node1 = hashtbl->nodes[hash1]);
+    node1 = hashtbl->nodes[hash1];
     hashtbl->nodes[hash1] = NULL;
     hashtbl->nodes[hash2] = NULL;
     hash1 = hashtbl->hashfunc(node1->key) % hashtbl->size;
@@ -362,31 +358,33 @@ void write_tcp_data_to_files(tCString dirpath)
     }
 }
 
-// TODO:
+
 void write_http_data_to_dir(tCString filename, tCString dirpath)
 {
     DATA_BLOCK datablock = read_file_into_memory(filename);
     tByte *data = datablock.data;
+    // if file is empty
     if (!data)
         return;
     size_t data_len = datablock.len;
+
     tByte *begin = data;
     tByte *end;
+    size_t left_len;
     tByte *token;
     size_t token_len;
-    size_t left_len;
 
     http_parser_settings settings;
     http_parser parser;
-
     init_http_state();
+
     do
     {
         // set callback function and execute http parse
         init_http_settings(&settings);
         http_parser_init(&parser, HTTP_BOTH);
 
-        // get a request or response string
+        // find the offset of a request or response
         left_len = data + data_len - begin;
         end = (tByte *)mymemmem(begin, left_len, REQUEST_GAP, REQUEST_GAP_LEN);
         token_len = (end == NULL) ? (left_len) : (size_t)(end - begin);
@@ -394,12 +392,12 @@ void write_http_data_to_dir(tCString filename, tCString dirpath)
 
         size_t nparsed = http_parser_execute(&parser, &settings, (tCString)token, token_len);
         if (nparsed != token_len)
-            mywarning("[0x%08X]: %s\n%.14s",
+            mywarning("[0x%08X]: %s: %s",
                       (unsigned int)(begin + nparsed - data),
                       filename,
                       http_errno_description(HTTP_PARSER_ERRNO(&parser)));
 
-        // move begin cursor to next scan
+        // move `begin` cursor to next scan begin
         token += nparsed;
         begin = end + REQUEST_GAP_LEN;
         // skip '\r\n' in http request or response
@@ -436,7 +434,6 @@ void write_http_data_to_dirs(tCString reqs_dir, tCString dest_dir)
 
     closedir(dir);
 }
-// TODO END
 
 
 pcap_t *init_environment(int argc, char **argv)
@@ -444,7 +441,7 @@ pcap_t *init_environment(int argc, char **argv)
     tCString path;
     tCString dir;
 #ifdef DEBUG
-    path = "/Users/fz/Downloads/test.pcap";
+    path = "../test.pcap";
 #else
     if (argc < 2)
         myerror("usage: %s [file]", argv[0]);
@@ -482,9 +479,6 @@ void hash_all_pcap_item(pcap_t *handle)
         // skip if neither IPv4 nor IPv6
         if (NULL == ip_header)
             continue;
-        // TODO: skip IPv6 because I can't hold it ╮(╯_╰)╭
-        if (is_ip6(get_ip_protocol(ip_header)))
-            continue;
         if (is_tcp(ip_header))
         {
             hash_pcap_item(pk, &header);
@@ -508,8 +502,9 @@ int main(int argc, char **argv)
     write_tcp_data_to_files(reqs_path);
     empty_hash_table();
 
-    set_hash_freefunc(NULL);
     write_http_data_to_dirs(reqs_path, http_path);
+    // No data to be free
+    set_hash_freefunc(NULL);
     destroy_hash_table();
 
     reset_environment(handle);

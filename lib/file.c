@@ -55,7 +55,10 @@ tCString pathcat(tCString dir, tCString filename)
     char last = *(dir + len - 1);
     if (last == PATH_DELIMITER_C)
         return (tCString)mystrcat(2, dir, filename);
-    return (tCString)mystrcat(3, dir, PATH_DELIMITER_S, filename);
+    if (*dir)
+        return (tCString)mystrcat(3, dir, PATH_DELIMITER_S, filename);
+    else
+        return mystrdup(filename);
 }
 
 /*
@@ -94,8 +97,9 @@ tCString url2filename(tCString url)
 tCString getdirname(tCString filename)
 {
     tCString d = strrchr(filename, PATH_DELIMITER_C);
-    size_t len = d ? (d - filename) : strlen(filename);
-    return strndup(filename, len);
+    if (d)
+        return strndup(filename, d - filename);
+    return mystrdup("");
 }
 
 // returns the final component of a pathname

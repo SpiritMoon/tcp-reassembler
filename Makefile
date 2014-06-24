@@ -1,8 +1,9 @@
-VERSION = DEBUG
-# VERSION = NDEBUG
+# VERSION = DEBUG
+VERSION = NDEBUG
 CC = clang
 MAKE = make
 CFLAGS = -Wall -Wextra -std=gnu99 -D$(VERSION) -c
+EXECUTABLE = tcp_reassembler
 
 ifeq ($(VERSION), DEBUG)
   CFLAGS += -g -Wno-unused-parameter
@@ -15,11 +16,12 @@ export
 all:
 	cd lib && $(MAKE);
 	cd src && $(MAKE);
-	mv src/main main;
+	mv src/$(EXECUTABLE) .
 
 clean:
 	cd lib && $(MAKE) clean;
 	cd src && $(MAKE) clean;
+	rm -f $(EXECUTABLE)
 
 run:
 	./$(EXECUTABLE)

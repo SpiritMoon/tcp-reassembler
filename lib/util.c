@@ -1,7 +1,7 @@
 #include <stdlib.h>
-#include <assert.h>
 #include <string.h>
 #include "util.h"
+#include "file.h"
 
 inline void myfree(void *x)
 {
@@ -35,14 +35,16 @@ void *mymemmem(const void *haystack, size_t haystacklen, const void *needle, siz
 void *mymalloc(size_t size)
 {
     void *ptr = malloc(size);
-    assert(ptr);
+    if (!ptr)
+        myerror("malloc failed");
     return ptr;
 }
 
 void *mycalloc(size_t count, size_t size)
 {
     void *ptr = calloc(count, size);
-    assert(ptr);
+    if (!ptr)
+        myerror("calloc failed");
     return ptr;
 }
 
@@ -84,7 +86,6 @@ void lowercase(char *str)
 char *mystrdup(const char *s)
 {
     char *b = mymalloc(strlen(s) + 1);
-    assert(b);
     strcpy(b, s);
     return b;
 }
@@ -104,16 +105,18 @@ void mywarning(const char *format, ...)
 {
 #ifdef DEBUG
     FILE *fp = stderr;
+    fprintf(fp, ANSI_FG_YELLOW);
 #else
     FILE *fp = safe_fopen("warning.log", "a");
 #endif /* DEBUG */
-    fprintf(fp, ANSI_FG_YELLOW);
     va_list args;
     va_start(args, format);
     vfprintf(fp, format, args);
     va_end(args);
+#ifdef DEBUG
     fprintf(fp, ANSI_RESET "\n");
-#ifndef DEBUG
+#else
+    fprintf(fp, "\n");
     fclose(fp);
 #endif /* DEBUG */
 }
@@ -132,7 +135,6 @@ char *mystrcat(int argc, const char *str1, ...)
         // 1 for '\0'
         if (!(ss = realloc(ss, len + 1)))
             myerror("alloc memory for `mystrcat` function failed");
-        assert(ss);
         ss[len] = '\0';
         strcat(ss, s);
     }

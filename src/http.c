@@ -201,8 +201,7 @@ void update_http_state(tCString dirpath)
         if (host)
         {
             dirpath = pathcat(dirpath, host);
-            if (-1 == get_hash_index(dirpath)) {
-            // if (!is_hash_key_exist(dirpath)) {
+            if (!is_hash_key_exist(dirpath)) {
                 insert_hash_node(dirpath, NULL);
                 makedir(dirpath);
             }

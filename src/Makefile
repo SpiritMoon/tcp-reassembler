@@ -3,7 +3,6 @@ CFLAGS += -I$(LIBDIR)
 LDFLAGS = -lpcap -lz -L$(LIBDIR)
 SOURCES = main.c http.c http_parser.c tcp.c udp.c ip.c network.c
 OBJECTS = $(SOURCES:.c=.o)
-EXECUTABLE = main
 
 
 all: $(SOURCES) $(EXECUTABLE)
@@ -15,4 +14,4 @@ $(EXECUTABLE): $(OBJECTS)
 	$(CC) $(CFLAGS) $< -o $@
 
 clean:
-	rm -f *.o ../$(EXECUTABLE)
+	rm -f *.o

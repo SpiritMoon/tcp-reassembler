@@ -1,5 +1,4 @@
 #include <stdio.h>
-#include <assert.h>
 #include "util.h"
 #include "hash.h"
 
@@ -84,7 +83,7 @@ size_t hashtbl_index(HASHTBL *hashtbl, const char *key)
 
 inline tBool hashtbl_key_exist(HASHTBL *hashtbl, const char *key)
 {
-    return hashtbl_index(hashtbl, key) == (size_t)(-1);
+    return hashtbl_index(hashtbl, key) != (size_t)(-1);
 }
 
 HASHNODE *hashtbl_get(HASHTBL *hashtbl, const char *key)
@@ -97,10 +96,9 @@ HASHNODE *hashtbl_get(HASHTBL *hashtbl, const char *key)
 
 void hashtbl_rehash(HASHTBL *hashtbl)
 {
-    HASHNODE **oldnodes = hashtbl->nodes;
-    HASHNODE **newnodes;
     size_t newsize = 2 * hashtbl->size;
-    assert(newnodes = mycalloc(newsize, sizeof(HASHNODE *)));
+    HASHNODE **oldnodes = hashtbl->nodes;
+    HASHNODE **newnodes = mycalloc(newsize, sizeof(HASHNODE *));
 
     for (int i = 0; i < (int)hashtbl->size; i++)
     {
@@ -112,7 +110,7 @@ void hashtbl_rehash(HASHTBL *hashtbl)
             i = -1;
             newsize *= 2;
             free(newnodes);
-            assert(newnodes = mycalloc(newsize, sizeof(HASHNODE *)));
+            newnodes = mycalloc(newsize, sizeof(HASHNODE *));
         }
         else
         {
@@ -282,7 +280,9 @@ inline size_t remove_hash_nodes(const char *key)
 
 
 #ifdef TEST_HASH
+
 #include <string.h>
+#include <assert.h>
 
 int main(int argc, char **argv)
 {
