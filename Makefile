@@ -1,26 +1,31 @@
-VERSION=DEBUG
-CC=cc
-CFLAGS= -Wall -Wextra -std=c99 -D$(VERSION) -g -c
-PDEFINE= -D_BSD_SOURCE
-LDFLAGS= -lpcap -lz
-SOURCES= main.c myhttp.c http_parser.c mytcp.c myudp.c myip.c mynetwork.c util.c hashtbl.c list.c
-OBJECTS=$(SOURCES:.c=.o)
-EXECUTABLE=main
+VERSION = DEBUG
+# VERSION = NDEBUG
+CC = clang
+MAKE = make
+CFLAGS = -Wall -Wextra -std=gnu99 -D$(VERSION) -c
 
-all: $(SOURCES) $(EXECUTABLE)
+ifeq ($(VERSION), DEBUG)
+  CFLAGS += -g -Wno-unused-parameter
+else
+  CFLAGS += -O2 -Wno-parentheses
+endif
+export
 
-$(EXECUTABLE): $(OBJECTS)
-	$(CC) $(LDFLAGS) $(OBJECTS) -o $@
 
-.c.o:
-	$(CC) $(CFLAGS) $< -o $@
+all:
+	cd lib && $(MAKE);
+	cd src && $(MAKE);
+	mv src/main main;
 
 clean:
-	rm -f *.o $(EXECUTABLE)
+	cd lib && $(MAKE) clean;
+	cd src && $(MAKE) clean;
 
 run:
 	./$(EXECUTABLE)
 
+l:
+	cd lib && $(MAKE)
+
 d:
 	make clean && make && make run
-

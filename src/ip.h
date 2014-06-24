@@ -1,31 +1,7 @@
-#ifndef _MYIP_H_
-#define _MYIP_H_
+#ifndef MY_IP_H
+#define MY_IP_H
 
-#include "mytypes.h"
-#include "mynetwork.h"
-#include "util.h"
-
-#define IP_PORT_FORMAT     "%s.%d-%s.%d"
-
-#define AF_INET     2
-#define AF_INET6    10
-
-typedef uint32_t in_addr_t;
-struct in_addr {
-    in_addr_t s_addr;
-};
-
-struct in6_addr {
-    union
-      {
-    uint8_t __u6_addr8[16];
-    uint16_t __u6_addr16[8];
-    uint32_t __u6_addr32[4];
-      } __in6_u;
-#define s6_addr        __in6_u.__u6_addr8
-#define s6_addr16      __in6_u.__u6_addr16
-#define s6_addr32      __in6_u.__u6_addr32
-};
+#include "network.h"
 
 typedef struct {
 // #if __BYTE_ORDER == __LITTLE_ENDIAN
@@ -67,32 +43,30 @@ typedef struct {
 #define ip6_nxt   ip6_ctlun.ip6_un1.ip6_un1_nxt
 #define ip6_hlim  ip6_ctlun.ip6_un1.ip6_un1_hlim
 #define ip6_hops  ip6_ctlun.ip6_un1.ip6_un1_hlim
-
-
-#define IP4(x) ((ip4_hdr *)(x))
-#define IP6(x) ((ip6_hdr *)(x))
-#define IP4_V(x) (is_little_endian() ? (x)->ip_v : (x)->ip_hl)
-#define IP4_HL(x) (is_little_endian() ? (x)->ip_hl : (x)->ip_v)
-
+#define ip4_v(x) (is_little_endian() ? (x)->ip_v : (x)->ip_hl)
+#define ip4_hl(x) (is_little_endian() ? (x)->ip_hl : (x)->ip_v)
 #define SPORT(upper_layer) (*(unsigned short *)(upper_layer))
 #define DPORT(upper_layer) (*(unsigned short *)((upper_layer) + 2))
+#define IP4(x) ((ip4_hdr *)(x))
+#define IP6(x) ((ip6_hdr *)(x))
 
-#define is_ip4(protocol) (protocol == PROTOCOL_IP4)
-#define is_ip6(protocol) (protocol == PROTOCOL_IP6)
-#define is_ip(protocol) (is_ip4(protocol) || is_ip6(protocol))
+#define IP_PORT_DELIMITER_S "."
+#define IP_PORT_DELIMITER_C (*IP_PORT_DELIMITER_S)
+#define IP_PAIR_DELIMITER_S "-"
+#define IP_PAIR_DELIMITER_C (*IP_PAIR_DELIMITER_S)
 
-#define get_ip_header_n(node) get_ip_header(((pcap_item *)node->data)->packet)
-#define get_ip_id_n(node) get_ip_id(get_ip_header_n(node))
+extern tBool is_ip4(int protocol);
+extern tBool is_ip6(int protocol);
+extern tBool is_ip(int protocol);
+extern tBool is_tcp(tByte *ip_header);
+extern tBool is_udp(tByte *ip_header);
+extern tBool is_same_ip_port(tByte *ip_header1, tByte *ip_header2);
+extern tBool match_transport_protocol(tByte *ip_header, int protocol);
+extern int get_ip_protocol(tByte *ip_header);
+extern unsigned short get_ip_id(tByte *ip_header);
+extern tByte *get_ip_header(tByte *pcap_packet);
+extern tByte *get_transport_layer_header(tByte *ip_header);
+extern tCString get_ip_port_pair(tByte *ip_header);
+extern tCString reverse_ip_port_pair(tCString ip_port_pair);
 
-tVar get_ip_header(tByte *pcap_packet);
-int get_ip_protocol(tVar ip_header);
-unsigned short get_ip_id(tVar ip_header);
-tBool is_tcp(tVar ip_header);
-tBool is_udp(tVar ip_header);
-tByte *get_transport_layer_header(tVar ip_header);
-tCString get_ip_port_pair(tVar ip_header);
-tCString reverse_ip_port_pair(tCString ip_port_pair);
-tBool is_same_ip_port(tVar ip_header1, tVar ip_header2);
-tCString get_ip_pair_from_filename(tCString filename);
-
-#endif /* _MYIP_H_ */
+#endif /* MY_IP_H */

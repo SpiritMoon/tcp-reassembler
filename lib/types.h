@@ -1,5 +1,5 @@
-#ifndef _MYTYPES_H_
-#define _MYTYPES_H_
+#ifndef MY_TYPES_H
+#define MY_TYPES_H
 
 
 #include <stddef.h>
@@ -17,6 +17,10 @@ typedef unsigned short          u_short;
 #define _U_CHAR
 typedef unsigned char           u_char;
 #endif /* _U_CHAR */
+#ifndef _U_LONG
+#define _U_LONG
+typedef unsigned long           u_long;
+#endif /* _U_LONG */
 
 #ifndef _INT8_T
 #define _INT8_T
@@ -81,4 +85,4 @@ typedef const unsigned char     tByte;
 #endif
 
 
-#endif /* _MYTYPES_H_ */
+#endif /* MY_TYPES_H */

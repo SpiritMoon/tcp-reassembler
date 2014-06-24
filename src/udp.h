@@ -1,7 +1,7 @@
-#ifndef _MYUDP_H_
-#define _MYUDP_H_
+#ifndef MY_UDP_H
+#define MY_UDP_H
 
-#include "mytypes.h"
+#include "ip.h"
 
 typedef struct {
     u_int16_t uh_sport;       /* source port */
@@ -10,4 +10,4 @@ typedef struct {
     u_int16_t uh_sum;         /* udp checksum */
 } udp_hdr;
 
-#endif /* _MYUDP_H_ */
+#endif /* MY_UDP_H */

@@ -24,12 +24,8 @@
  *
  * $Id: dirent.h,v 1.20 2014/03/19 17:52:23 tronkko Exp $
  */
-#ifndef _DIRENT_H
-#define _DIRENT_H
-
-#ifndef _WIN32
-#include <dirent.h>
-#else
+#ifndef MY_DIRENT_H
+#define MY_DIRENT_H
 
 /*
  * Define architecture flags so we don't need to include windows.h.
@@ -840,4 +836,3 @@ dirent_set_errno(
 #endif
 
 #endif /* _WIN32 */
-#endif /* _DIRENT_H */
