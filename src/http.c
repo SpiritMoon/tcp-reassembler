@@ -1,6 +1,7 @@
 #include <zlib.h>
 #include <string.h>
 #include <stdlib.h>
+#include "mydirent.h"
 #include "util.h"
 #include "file.h"
 #include "hash.h"

@@ -11,7 +11,7 @@
  */
 #include <stdio.h>
 #include <string.h>
-#include <dirent.h>
+#include "mydirent.h"
 #include "file.h"
 #include "util.h"
 #include "hash.h"

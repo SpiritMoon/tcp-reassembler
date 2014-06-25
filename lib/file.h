@@ -20,8 +20,6 @@ typedef struct
 } DATA_BLOCK;
 
 extern FILE *safe_fopen(const char *path, const char *mode);
-extern int makedir(tCString path);
-extern int removedir(tCString path);
 extern size_t hexprint(tByte *byte_ptr, size_t length);
 extern tBool match_file_suffix(tCString filename, tCString suffix);
 extern size_t getfilesize(FILE *fp);

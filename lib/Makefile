@@ -1,5 +1,5 @@
 LDFLAGS = -nostartfiles
-SOURCES = util.c hash.c file.c
+SOURCES = util.c hash.c file.c mydirent.c
 OBJECTS = $(SOURCES:.c=.o)
 
 

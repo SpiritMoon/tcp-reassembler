@@ -1,6 +1,5 @@
 #include <stdlib.h>
 #include <string.h>
-#include "dirent.h"
 #include "util.h"
 #include "file.h"
 
@@ -114,56 +113,6 @@ tCString getfilesuffix(tCString filename)
 {
     tCString dot = strrchr(filename, '.');
     return dot ? mystrdup(dot + 1) : NULL;
-}
-
-int makedir(tCString path)
-{
-#ifdef _WIN32
-    return _mkdir(path);
-#else
-    return mkdir(path, 0754);
-#endif /* _WIN32 */
-}
-
-int removedir(tCString path)
-{
-#ifdef _WIN32
-    return -1;
-#else
-    DIR *d = opendir(path);
-    int r = -1;
-
-    if (d)
-    {
-        struct dirent *p;
-        r = 0;
-
-        while (!r && (p = readdir(d)))
-        {
-            /* Skip the names "." and ".." as we don't want to recurse on them. */
-            if (!strcmp(p->d_name, ".") || !strcmp(p->d_name, ".."))
-                continue;
-
-            int r2 = -1;
-            struct stat statbuf;
-            tCString buf = pathcat(path, p->d_name);
-            if (!stat(buf, &statbuf))
-            {
-                if (S_ISDIR(statbuf.st_mode))
-                    r2 = removedir(buf);
-                else
-                    r2 = unlink(buf);
-            }
-            free((tVar)buf);
-            r = r2;
-        }
-        closedir(d);
-    }
-
-    if (!r)
-        r = rmdir(path);
-    return r;
-#endif /* _WIN32 */
 }
 
 DATA_BLOCK read_file_into_memory(tCString path)
