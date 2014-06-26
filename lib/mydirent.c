@@ -11,7 +11,7 @@ extern "C" {
  * internal working area that is used to retrieve individual directory
  * entries.
  */
-th_off_WDIR*
+_WDIR*
 _wopendir(
     const wchar_t *dirname)
 {
@@ -110,7 +110,7 @@ _wopendir(
  * this function include regular files, sub-directories, pseudo-directories
  * "." and ".." as well as volume labels, hidden files and system files.
  */
-th_offstruct _wdirent*
+struct _wdirent*
 _wreaddir(
     _WDIR *dirp)
 {
@@ -170,7 +170,7 @@ _wreaddir(
  * DIR structure as well as any directory entry read previously by
  * _wreaddir().
  */
-th_offint
+int
 _wclosedir(
     _WDIR *dirp)
 {
@@ -205,7 +205,7 @@ _wclosedir(
  * Rewind directory stream such that _wreaddir() returns the very first
  * file name again.
  */
-th_offvoid
+void
 _wrewinddir(
     _WDIR* dirp)
 {
@@ -221,7 +221,7 @@ _wrewinddir(
 }
 
 /* Get first directory entry (internal) */
-th_offWIN32_FIND_DATAW*
+WIN32_FIND_DATAW*
 dirent_first(
     _WDIR *dirp)
 {
@@ -246,7 +246,7 @@ dirent_first(
 }
 
 /* Get next directory entry (internal) */
-th_offWIN32_FIND_DATAW*
+WIN32_FIND_DATAW*
 dirent_next(
     _WDIR *dirp)
 {
@@ -285,7 +285,7 @@ dirent_next(
 /*
  * Open directory stream using plain old C-string.
  */
-th_offDIR*
+DIR*
 opendir(
     const char *dirname)
 {
@@ -355,7 +355,7 @@ opendir(
  * ANSI strings to the console code page so many non-ASCII characters will
  * display correcly.
  */
-th_offstruct dirent*
+struct dirent*
 readdir(
     DIR *dirp)
 {
@@ -438,7 +438,7 @@ readdir(
 /*
  * Close directory stream.
  */
-th_offint
+int
 closedir(
     DIR *dirp)
 {
@@ -465,7 +465,7 @@ closedir(
 /*
  * Rewind directory stream to beginning.
  */
-th_offvoid
+void
 rewinddir(
     DIR* dirp)
 {
@@ -474,7 +474,7 @@ rewinddir(
 }
 
 /* Convert multi-byte string to wide character string */
-th_offint
+int
 dirent_mbstowcs_s(
     size_t *pReturnValue,
     wchar_t *wcstr,
@@ -516,7 +516,7 @@ dirent_mbstowcs_s(
 }
 
 /* Convert wide-character string to multi-byte string */
-th_offint
+int
 dirent_wcstombs_s(
     size_t *pReturnValue,
     char *mbstr,
@@ -569,7 +569,7 @@ dirent_wcstombs_s(
 }
 
 /* Set errno variable */
-th_offvoid
+void
 dirent_set_errno(
     int error)
 {

@@ -5,12 +5,13 @@
 # include <Windows.h>
 # define PATH_DELIMITER_S "\\"
 #else
-# include <sys/stat.h>
 # define PATH_DELIMITER_S "/"
 #endif /* __WIN32__ */
-# define PATH_DELIMITER_C (*PATH_DELIMITER_S)
+
+#define PATH_DELIMITER_C (*PATH_DELIMITER_S)
 
 #include <stdio.h>
+#include <sys/stat.h>
 #include "types.h"
 
 typedef struct

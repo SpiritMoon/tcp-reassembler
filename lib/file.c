@@ -37,15 +37,11 @@ tBool match_file_suffix(tCString filename, tCString suffix)
 
 size_t getfilesize(FILE *fp)
 {
-    fseek(fp, 0, SEEK_END);
-    size_t data_len = ftell(fp);
-    fseek(fp, 0, SEEK_SET);
-    if (data_len == (size_t)(-1))
-    {
-        fclose(fp);
-        myerror("call ftell failed\n");
-    }
-    return data_len;
+    struct stat s;
+    fstat(fileno(fp), &s);
+    if (s.st_size == -1)
+        myerror("call %s failed\n", __func__);
+    return s.st_size;
 }
 
 tCString pathcat(tCString dir, tCString filename)

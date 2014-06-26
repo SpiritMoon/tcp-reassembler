@@ -103,22 +103,13 @@ void myerror(const char *format, ...)
 
 void mywarning(const char *format, ...)
 {
-#ifdef DEBUG
     FILE *fp = stderr;
     fprintf(fp, ANSI_FG_YELLOW);
-#else
-    FILE *fp = safe_fopen("warning.log", "a");
-#endif /* DEBUG */
     va_list args;
     va_start(args, format);
     vfprintf(fp, format, args);
     va_end(args);
-#ifdef DEBUG
     fprintf(fp, ANSI_RESET "\n");
-#else
-    fprintf(fp, "\n");
-    fclose(fp);
-#endif /* DEBUG */
 }
 
 char *mystrcat(int argc, const char *str1, ...)

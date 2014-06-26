@@ -21,6 +21,59 @@
 #include "http.h"
 #include "main.h"
 
+
+static inline tByte *get_ip_header_n(HASHNODE *node)
+{
+    return get_ip_header(((pcap_item *)node->data)->packet);
+}
+
+static inline int get_ip_id_n(HASHNODE *node)
+{
+    return get_ip_id(get_ip_header_n(node));
+}
+
+static inline tcp_hdr *get_tcp_header_p(tByte *pcap_packet)
+{
+    return get_tcp_header(get_ip_header(pcap_packet));
+}
+
+static inline tcp_hdr *get_tcp_header_n(HASHNODE *node)
+{
+    return get_tcp_header_p(((pcap_item *)node->data)->packet);
+}
+// return beginning memory address of tcp data
+static inline tByte *get_tcp_data_n(HASHNODE *node)
+{
+    return (tByte *)((tString)(get_tcp_header_n(node)) + th_off(get_tcp_header_n(node)) * 4);
+}
+
+static inline size_t get_tcp_data_length_p(tByte *pcap_packet)
+{
+    return get_tcp_data_length(get_ip_header(pcap_packet));
+}
+
+static inline size_t get_tcp_data_length_n(HASHNODE *node)
+{
+    return get_tcp_data_length_p(((pcap_item *)node->data)->packet);
+}
+
+static inline tBool is_near_ip_packet_n(HASHNODE *node, HASHNODE *next)
+{
+    return ((get_ip_id_n(next) - get_ip_id_n(node)) == 1);
+}
+
+static inline tBool is_tcp_pdu_n(HASHNODE *node, HASHNODE *next)
+{
+    tByte *cip_header = get_ip_header_n(node);
+    tByte *nip_header = get_ip_header_n(next);
+    tcp_hdr *ctcp_pkt = get_tcp_header(cip_header);
+    tcp_hdr *ntcp_pkt = get_tcp_header(nip_header);
+
+    return is_same_ip_port(cip_header, nip_header)
+        && ctcp_pkt->th_ack == ntcp_pkt->th_ack
+        && ntohl(ctcp_pkt->th_seq) < ntohl(ntcp_pkt->th_seq);
+}
+
 // hash operation
 void free_pcap_item(tVar ptr)
 {
@@ -270,20 +323,22 @@ size_t combine_tcp_nodes(tCString key1, tCString key2)
     return hash1;
 }
 
+// I can find no way to figure it out.
 tBool is_same_tcp_node(HASHNODE *node1, HASHNODE *node2)
 {
+    return FALSE;
+
     tByte *ip_header1 = get_ip_header_n(node1);
     tByte *ip_header2 = get_ip_header_n(node2);
     tcp_hdr *ctcp_packet = get_tcp_header(ip_header1);
     tcp_hdr *ntcp_packet = get_tcp_header(ip_header2);
 
-    // TODO: forget this function, I can't find any solution to do this.
-    return FALSE && is_same_ip_port(ip_header1, ip_header2)
-           && ctcp_packet->th_seq == ntcp_packet->th_seq
-           && ctcp_packet->th_ack == ntcp_packet->th_ack;
+    return is_same_ip_port(ip_header1, ip_header2)
+        && ctcp_packet->th_seq == ntcp_packet->th_seq
+        && ctcp_packet->th_ack == ntcp_packet->th_ack;
 }
 
-HASHNODE *filter_tcp_packet(size_t index)
+void filter_tcp_packet(size_t index)
 {
     HASHTBL *hashtbl = get_hash_table();
     HASHNODE *node = hashtbl->nodes[index];
@@ -305,40 +360,39 @@ HASHNODE *filter_tcp_packet(size_t index)
             else
                 prev->next = next;
             remove_hash_node(node);
-        }
-        else
-        {
+        } else {
             prev = node;
         }
         node = next;
     }
-
-    return hashtbl->nodes[index];
 }
 
 void tidy_tcp_packet_in_hashtbl()
 {
     HASHITR hashitr = hashtbl_iterator(get_hash_table());
-    HASHNODE *node1;
-    while (node1 = hashtbl_next(&hashitr)) {
-        tCString key1 = node1->key;
+    HASHNODE *node;
+    while (node = hashtbl_next(&hashitr)) {
+        tCString key1 = node->key;
         tCString key2 = reverse_ip_port_pair(key1);
-        filter_tcp_packet(combine_tcp_nodes(key1, key2));
+        size_t hash = combine_tcp_nodes(key1, key2);
+        filter_tcp_packet(hash);
     }
 }
 
 void write_tcp_data_to_file(FILE *fp, HASHNODE *node)
 {
+    HASHNODE *next = node->next;
     tByte *ip_header = get_ip_header_n(node);
     tcp_hdr *tcp_header = get_tcp_header(ip_header);
     size_t data_len = get_tcp_data_length(ip_header);
     tByte *data_ptr = get_tcp_data(tcp_header);
-    if (data_len && data_len != fwrite(data_ptr, 1, data_len, fp))
-        mylogging("write wrong size of tcp data to file\n");
 
-    HASHNODE *next = node->next;
-    // if not nearby packet, then write a delimiter
-    if (next && (get_ip_id_n(next) - get_ip_id_n(node) != 1))
+    if (data_len && data_len != fwrite(data_ptr, 1, data_len, fp))
+        mylogging("write wrong size of tcp data to file");
+
+    // if neither nearby packet or PDU, then write a delimiter
+    if (next && !(is_near_ip_packet_n(node, next)
+               || is_tcp_pdu_n(node, next)))
         fwrite(REQUEST_GAP, 1, REQUEST_GAP_LEN, fp);
 }
 
@@ -363,10 +417,10 @@ void write_http_data_to_dir(tCString filename, tCString dirpath)
 {
     DATA_BLOCK datablock = read_file_into_memory(filename);
     tByte *data = datablock.data;
-    // if file is empty
-    if (!data)
-        return;
     size_t data_len = datablock.len;
+    // if file is empty
+    if (0 == data_len)
+        return;
 
     tByte *begin = data;
     tByte *end;
@@ -441,7 +495,7 @@ pcap_t *init_environment(int argc, char **argv)
     tCString path;
     tCString dir;
 #ifdef DEBUG
-    path = "../test.pcap";
+    path = "test.pcap";
 #else
     if (argc < 2)
         myerror("usage: %s [file]", argv[0]);
@@ -480,13 +534,7 @@ void hash_all_pcap_item(pcap_t *handle)
         if (NULL == ip_header)
             continue;
         if (is_tcp(ip_header))
-        {
             hash_pcap_item(pk, &header);
-        }
-        else if (is_udp(ip_header))
-        {
-            // TODO: deal with UDP
-        }
     }
 }
 

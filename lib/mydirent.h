@@ -153,14 +153,27 @@ int removedir(const char *path);
  * only defined for compatibility.  These macros should always return false
  * on Windows.
  */
+#ifndef S_ISFIFO
 #define	S_ISFIFO(mode) (((mode) & S_IFMT) == S_IFIFO)
+#endif
+#ifndef S_ISDIR
 #define	S_ISDIR(mode)  (((mode) & S_IFMT) == S_IFDIR)
+#endif
+#ifndef S_ISREG
 #define	S_ISREG(mode)  (((mode) & S_IFMT) == S_IFREG)
+#endif
+#ifndef S_ISLNK
 #define	S_ISLNK(mode)  (((mode) & S_IFMT) == S_IFLNK)
+#endif
+#ifndef S_ISSOCK
 #define	S_ISSOCK(mode) (((mode) & S_IFMT) == S_IFSOCK)
+#endif
+#ifndef S_ISCHR
 #define	S_ISCHR(mode)  (((mode) & S_IFMT) == S_IFCHR)
+#endif
+#ifndef S_ISBLK
 #define	S_ISBLK(mode)  (((mode) & S_IFMT) == S_IFBLK)
-
+#endif
 /* Return the exact length of d_namlen without zero terminator */
 #define _D_EXACT_NAMLEN(p) ((p)->d_namlen)
 
@@ -191,10 +204,10 @@ struct _WDIR {
 };
 typedef struct _WDIR _WDIR;
 
-th_off_WDIR *_wopendir (const wchar_t *dirname);
-th_offstruct _wdirent *_wreaddir (_WDIR *dirp);
-th_offint _wclosedir (_WDIR *dirp);
-th_offvoid _wrewinddir (_WDIR* dirp);
+_WDIR *_wopendir (const wchar_t *dirname);
+struct _wdirent *_wreaddir (_WDIR *dirp);
+int _wclosedir (_WDIR *dirp);
+void _wrewinddir (_WDIR* dirp);
 
 /* For compatibility with Symbian */
 #define wdirent _wdirent
@@ -223,30 +236,30 @@ typedef struct DIR DIR;
 
 #define makedir(path) mkdir(path)
 
-th_offDIR *opendir (const char *dirname);
-th_offstruct dirent *readdir (DIR *dirp);
-th_offint closedir (DIR *dirp);
-th_offvoid rewinddir (DIR* dirp);
+DIR *opendir (const char *dirname);
+struct dirent *readdir (DIR *dirp);
+int closedir (DIR *dirp);
+void rewinddir (DIR* dirp);
 
 /* Internal utility functions */
-th_offWIN32_FIND_DATAW *dirent_first (_WDIR *dirp);
-th_offWIN32_FIND_DATAW *dirent_next (_WDIR *dirp);
+WIN32_FIND_DATAW *dirent_first (_WDIR *dirp);
+WIN32_FIND_DATAW *dirent_next (_WDIR *dirp);
 
-th_offint dirent_mbstowcs_s(
+int dirent_mbstowcs_s(
     size_t *pReturnValue,
     wchar_t *wcstr,
     size_t sizeInWords,
     const char *mbstr,
     size_t count);
 
-th_offint dirent_wcstombs_s(
+int dirent_wcstombs_s(
     size_t *pReturnValue,
     char *mbstr,
     size_t sizeInBytes,
     const wchar_t *wcstr,
     size_t count);
 
-th_offvoid dirent_set_errno (int error);
+void dirent_set_errno (int error);
 
 #ifdef __cplusplus
 }
