@@ -32,13 +32,3 @@ inline tByte *get_tcp_data(tcp_hdr *tcp_header)
 {
     return (tByte *)((tString)(tcp_header) + th_off(tcp_header) * 4);
 }
-
-inline tBool is_tcp_syn(tcp_hdr *tcp_header)
-{
-    return tcp_header->th_flags & TH_SYN;
-}
-
-inline tBool is_tcp_fin(tcp_hdr *tcp_header)
-{
-    return tcp_header->th_flags & TH_FIN;
-}

@@ -41,6 +41,7 @@ static inline tcp_hdr *get_tcp_header_n(HASHNODE *node)
 {
     return get_tcp_header_p(((pcap_item *)node->data)->packet);
 }
+
 // return beginning memory address of tcp data
 static inline tByte *get_tcp_data_n(HASHNODE *node)
 {
@@ -55,23 +56,6 @@ static inline size_t get_tcp_data_length_p(tByte *pcap_packet)
 static inline size_t get_tcp_data_length_n(HASHNODE *node)
 {
     return get_tcp_data_length_p(((pcap_item *)node->data)->packet);
-}
-
-static inline tBool is_near_ip_packet_n(HASHNODE *node, HASHNODE *next)
-{
-    return ((get_ip_id_n(next) - get_ip_id_n(node)) == 1);
-}
-
-static inline tBool is_tcp_pdu_n(HASHNODE *node, HASHNODE *next)
-{
-    tByte *cip_header = get_ip_header_n(node);
-    tByte *nip_header = get_ip_header_n(next);
-    tcp_hdr *ctcp_pkt = get_tcp_header(cip_header);
-    tcp_hdr *ntcp_pkt = get_tcp_header(nip_header);
-
-    return is_same_ip_port(cip_header, nip_header)
-        && ctcp_pkt->th_ack == ntcp_pkt->th_ack
-        && ntohl(ctcp_pkt->th_seq) < ntohl(ntcp_pkt->th_seq);
 }
 
 // hash operation
@@ -273,8 +257,8 @@ size_t combine_tcp_nodes(tCString key1, tCString key2)
         return hash1;
 
     // make sure of node1 being requester and node2 being responser
-    unsigned char flags = get_tcp_header_n(node1)->th_flags;
-    if ((flags & TH_SYN) && (flags & TH_ACK))
+    tcp_hdr *t = get_tcp_header_n(node1);
+    if (tcp_syn(t) && tcp_ack(t))
     {
         size_t tmp = hash1;
         hash1 = hash2;
@@ -323,50 +307,6 @@ size_t combine_tcp_nodes(tCString key1, tCString key2)
     return hash1;
 }
 
-// I can find no way to figure it out.
-tBool is_same_tcp_node(HASHNODE *node1, HASHNODE *node2)
-{
-    return FALSE;
-
-    tByte *ip_header1 = get_ip_header_n(node1);
-    tByte *ip_header2 = get_ip_header_n(node2);
-    tcp_hdr *ctcp_packet = get_tcp_header(ip_header1);
-    tcp_hdr *ntcp_packet = get_tcp_header(ip_header2);
-
-    return is_same_ip_port(ip_header1, ip_header2)
-        && ctcp_packet->th_seq == ntcp_packet->th_seq
-        && ctcp_packet->th_ack == ntcp_packet->th_ack;
-}
-
-void filter_tcp_packet(size_t index)
-{
-    HASHTBL *hashtbl = get_hash_table();
-    HASHNODE *node = hashtbl->nodes[index];
-    HASHNODE *prev = node;
-    HASHNODE *next;
-
-    tBool should_drop;
-    while (node)
-    {
-        next = node->next;
-        // if they are duplication packet, then drop it
-        should_drop = next ? is_same_tcp_node(node, next) : FALSE;
-        // if no data, then skip node
-        should_drop |= (0 == get_tcp_data_length_n(node));
-        if (should_drop)
-        {
-            if (hashtbl->nodes[index] == node)
-                hashtbl->nodes[index] = next;
-            else
-                prev->next = next;
-            remove_hash_node(node);
-        } else {
-            prev = node;
-        }
-        node = next;
-    }
-}
-
 void tidy_tcp_packet_in_hashtbl()
 {
     HASHITR hashitr = hashtbl_iterator(get_hash_table());
@@ -374,39 +314,152 @@ void tidy_tcp_packet_in_hashtbl()
     while (node = hashtbl_next(&hashitr)) {
         tCString key1 = node->key;
         tCString key2 = reverse_ip_port_pair(key1);
-        size_t hash = combine_tcp_nodes(key1, key2);
-        filter_tcp_packet(hash);
+        combine_tcp_nodes(key1, key2);
     }
 }
 
-void write_tcp_data_to_file(FILE *fp, HASHNODE *node)
+
+/*
+ * check three handshake and return last handshake node
+ */
+HASHNODE *last_of_three_handshake(HASHNODE *head)
 {
-    HASHNODE *next = node->next;
-    tByte *ip_header = get_ip_header_n(node);
-    tcp_hdr *tcp_header = get_tcp_header(ip_header);
-    size_t data_len = get_tcp_data_length(ip_header);
-    tByte *data_ptr = get_tcp_data(tcp_header);
+    HASHNODE *secnd = head->next;
+    HASHNODE *three;
+    if (!secnd || !(three = secnd->next))
+        return NULL;
 
-    if (data_len && data_len != fwrite(data_ptr, 1, data_len, fp))
-        mylogging("write wrong size of tcp data to file");
+    tcp_hdr *t1 = get_tcp_header_n(head);
+    tcp_hdr *t2 = get_tcp_header_n(secnd);
+    tcp_hdr *t3 = get_tcp_header_n(three);
 
-    // if neither nearby packet or PDU, then write a delimiter
-    if (next && !(is_near_ip_packet_n(node, next)
-               || is_tcp_pdu_n(node, next)))
-        fwrite(REQUEST_GAP, 1, REQUEST_GAP_LEN, fp);
+    // check flags
+    if (!tcp_syn(t1))
+        return NULL;
+    if (!(tcp_syn(t2) && tcp_ack(t2)))
+        return NULL;
+    if (!tcp_ack(t3))
+        return NULL;
+
+    // check seq and ack
+    if (!(ntohl(t2->th_ack) == ntohl(t1->th_seq) + 1))
+        return NULL;
+    if (!(t2->th_ack == t3->th_seq && ntohl(t3->th_ack) == ntohl(t2->th_seq) + 1))
+        return NULL;
+
+    return three;
+}
+
+void write_tcp_data_to_file(tCString filename, HASHNODE *head)
+{
+    HASHNODE *node = last_of_three_handshake(head);
+    if (!node)
+        return;
+
+    // previous ip header of tcp segment packet (one direction)
+    tByte *ip_hdr1 = get_ip_header_n(node);
+    // previous ip header of tcp segment packet (another direction)
+    tByte *ip_hdr2 = NULL;
+    tByte *pip_hdr = NULL;
+    tByte *nip_hdr = NULL;
+    // previous tcp segment packet
+    tcp_hdr *ptcp_pkt = NULL;
+    tcp_hdr *ntcp_pkt = NULL;
+    tcp_seq pack = 0;
+    tcp_seq nack = 0;
+
+    FILE *fp = NULL;
+    // offset of tcp data
+    size_t offset = 0;
+    for (HASHNODE *next = node->next; node; next = node->next) {
+        tByte *data     = get_tcp_data_n(node);
+        size_t data_len = get_tcp_data_length_n(node);
+
+        size_t writelen = data_len - offset;
+        if (writelen > 0) {
+            // delay openning
+            if (!fp)
+                fp = safe_fopen(filename, "w");
+            // write data into file
+            if (writelen != fwrite(data + offset, 1, writelen, fp))
+                mylogging("Can't write all tcp bytes to '%s'", filename);
+        }
+        // if no more tcp data to write
+        if (!next)
+            break;
+
+        nip_hdr = get_ip_header_n(next);
+        // which direction should we do judge
+        if (is_same_ip_port(nip_hdr, ip_hdr1))
+            pip_hdr = ip_hdr1;
+        else if (!ip_hdr2)
+            ip_hdr2 = nip_hdr;
+        else if (is_same_ip_port(nip_hdr, ip_hdr2))
+            pip_hdr = ip_hdr2;
+        // may be a new tcp segment, so we record the header for next time judge
+        if (pip_hdr) {
+            ptcp_pkt = get_tcp_header(pip_hdr);
+            pack = ptcp_pkt->th_ack;
+        }
+        ntcp_pkt = get_tcp_header(nip_hdr);
+        nack = ntcp_pkt->th_ack;
+
+        size_t plen = get_tcp_data_length(pip_hdr);
+        size_t nlen = get_tcp_data_length(nip_hdr);
+        // if next node is a tcp segment node
+        if (nip_hdr != pip_hdr && nack == pack) {
+            size_t pseq = ntohl(ptcp_pkt->th_seq);
+            size_t nseq = ntohl(ntcp_pkt->th_seq);
+            offset = pseq + plen;
+
+            /*
+             *       plen
+             *   ------------
+             *   | tcp data |
+             *   ------------
+             * pseq    ----------------
+             *         |   tcp data   |
+             *         ----------------
+             *       nseq
+             */
+            if (offset >= nseq + nlen)
+                offset = nlen;
+            else if (offset > nseq)
+                offset -= nseq;
+            else
+                offset = 0;
+
+            // record the last ip header containing a tcp segment
+            if (pip_hdr == ip_hdr1)
+                ip_hdr1 = nip_hdr;
+            else
+                ip_hdr2 = nip_hdr;
+        } else {
+            offset = 0;
+            // write a delimiter to distinguish http request from http response
+            if (!strcmp(filename, "reqts/192.168.1.126.55629-61.158.76.68.80.txt")) {
+                printf("%zd\n", nlen);
+            }
+            if (fp && nlen)
+                fwrite(REQUEST_GAP, 1, REQUEST_GAP_LEN, fp);
+        }
+
+        node = next;
+    }
+
+    safe_fclose(fp);
 }
 
 void write_tcp_data_to_files(tCString dirpath)
 {
     HASHITR hashitr = hashtbl_iterator(get_hash_table());
-    HASHNODE *node;
-    while (node = hashtbl_next(&hashitr)) {
-        tCString basename = mystrcat(2, node->key, ".txt");
+    HASHNODE *head;
+    while (head = hashtbl_next(&hashitr)) {
+        tCString basename = mystrcat(2, head->key, ".txt");
         tCString filename = pathcat(dirpath, basename);
-        FILE *fp = safe_fopen(filename, "w");
-        for (; node; node = node->next)
-            write_tcp_data_to_file(fp, node);
-        fclose(fp);
+
+        write_tcp_data_to_file(filename, head);
+
         safe_free(filename);
         safe_free(basename);
     }

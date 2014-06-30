@@ -21,6 +21,7 @@ typedef struct
 } DATA_BLOCK;
 
 extern FILE *safe_fopen(const char *path, const char *mode);
+extern void safe_fclose(FILE *fp);
 extern size_t hexprint(tByte *byte_ptr, size_t length);
 extern tBool match_file_suffix(tCString filename, tCString suffix);
 extern size_t getfilesize(FILE *fp);

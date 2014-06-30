@@ -145,3 +145,9 @@ inline FILE *safe_fopen(const char *path, const char *mode)
         myerror("Can't open %s for mode '%s'", path, mode);
     return fp;
 }
+
+inline void safe_fclose(FILE *fp)
+{
+    if (fp)
+        fclose(fp);
+}
