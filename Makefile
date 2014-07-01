@@ -1,5 +1,5 @@
 VERSION = NDEBUG
-VERSION = DEBUG
+# VERSION = DEBUG
 CC = clang
 MAKE = make
 CFLAGS = -Wall -Wextra -std=gnu99 -D$(VERSION) -c

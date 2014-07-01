@@ -27,11 +27,6 @@ static inline tByte *get_ip_header_n(HASHNODE *node)
     return get_ip_header(((pcap_item *)node->data)->packet);
 }
 
-static inline int get_ip_id_n(HASHNODE *node)
-{
-    return get_ip_id(get_ip_header_n(node));
-}
-
 static inline tcp_hdr *get_tcp_header_p(tByte *pcap_packet)
 {
     return get_tcp_header(get_ip_header(pcap_packet));
@@ -356,19 +351,25 @@ void write_tcp_data_to_file(tCString filename, HASHNODE *head)
     if (!node)
         return;
 
-    // previous ip header of tcp segment packet (one direction)
+    FILE *fp = NULL;
+
+    // ip header of tcp segment packet (one direction)
     tByte *ip_hdr1 = get_ip_header_n(node);
-    // previous ip header of tcp segment packet (another direction)
+    // ip header of tcp segment packet (another direction)
     tByte *ip_hdr2 = NULL;
+    // previous ip header of tcp segment packet
     tByte *pip_hdr = NULL;
+    // next ip header to handle
     tByte *nip_hdr = NULL;
-    // previous tcp segment packet
+    // tcp header
     tcp_hdr *ptcp_pkt = NULL;
     tcp_hdr *ntcp_pkt = NULL;
+    // last tcp header having tcp data
+    tcp_hdr *ltcp_pkt = NULL;
     tcp_seq pack = 0;
     tcp_seq nack = 0;
-
-    FILE *fp = NULL;
+    size_t plen  = 0;
+    size_t nlen  = 0;
     // offset of tcp data
     size_t offset = 0;
     for (HASHNODE *next = node->next; node; next = node->next) {
@@ -383,6 +384,8 @@ void write_tcp_data_to_file(tCString filename, HASHNODE *head)
             // write data into file
             if (writelen != fwrite(data + offset, 1, writelen, fp))
                 mylogging("Can't write all tcp bytes to '%s'", filename);
+            // remember last tcp header having data
+            ltcp_pkt = get_tcp_header_n(node);
         }
         // if no more tcp data to write
         if (!next)
@@ -392,20 +395,20 @@ void write_tcp_data_to_file(tCString filename, HASHNODE *head)
         // which direction should we do judge
         if (is_same_ip_port(nip_hdr, ip_hdr1))
             pip_hdr = ip_hdr1;
+        // may be start of a new tcp segment, so we record the ip header for next time judging
         else if (!ip_hdr2)
             ip_hdr2 = nip_hdr;
         else if (is_same_ip_port(nip_hdr, ip_hdr2))
             pip_hdr = ip_hdr2;
-        // may be a new tcp segment, so we record the header for next time judge
+
         if (pip_hdr) {
             ptcp_pkt = get_tcp_header(pip_hdr);
             pack = ptcp_pkt->th_ack;
+            plen = get_tcp_data_length(pip_hdr);
         }
         ntcp_pkt = get_tcp_header(nip_hdr);
         nack = ntcp_pkt->th_ack;
-
-        size_t plen = get_tcp_data_length(pip_hdr);
-        size_t nlen = get_tcp_data_length(nip_hdr);
+        nlen = get_tcp_data_length(nip_hdr);
         // if next node is a tcp segment node
         if (nip_hdr != pip_hdr && nack == pack) {
             size_t pseq = ntohl(ptcp_pkt->th_seq);
@@ -436,13 +439,12 @@ void write_tcp_data_to_file(tCString filename, HASHNODE *head)
                 ip_hdr2 = nip_hdr;
         } else {
             offset = 0;
-            // write a delimiter to distinguish http request from http response
-            if (!strcmp(filename, "reqts/192.168.1.126.55629-61.158.76.68.80.txt")) {
-                printf("%zd\n", nlen);
-            }
-            if (fp && nlen)
-                fwrite(REQUEST_GAP, 1, REQUEST_GAP_LEN, fp);
         }
+
+        // if next tcp packet isn't a new tcp segment of last tcp packet,
+        // then write a delimiter for distinguish different parts
+        if (fp && nlen && ltcp_pkt->th_ack != nack)
+            fwrite(REQUEST_GAP, 1, REQUEST_GAP_LEN, fp);
 
         node = next;
     }
